@@ -89,7 +89,8 @@ export default function Login() {
         { idToken: response.credential }/// GOGLE TOKEN ID WILL BE THE RESPONESE
       );
       setUser(data.googleAuth.user);
-      navigate("/");
+      // navigate("/");
+      navigate("/inbox")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Google sign-in failed.");
     } finally {

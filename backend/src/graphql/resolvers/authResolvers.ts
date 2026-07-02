@@ -17,7 +17,7 @@ import { AuthContext, requireAuth } from "../../middleware/authContext.js";
 const googleClient = new OAuth2Client(ENV.GOOGLE_CLIENT_ID);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function formatUser(user: InstanceType<typeof User>) {
+export function formatUser(user: InstanceType<typeof User>) {
   return {
     id: user._id.toString(),
     name: user.name,

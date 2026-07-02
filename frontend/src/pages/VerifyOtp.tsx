@@ -72,7 +72,8 @@ export default function VerifyOtp() {
         { email, otp }
       );
       setUser(data.verifyOtp.user);
-      navigate("/");
+      // navigate("/");
+      navigate("/inbox")
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Verification failed.");
       setDigits(Array(OTP_LENGTH).fill(""));

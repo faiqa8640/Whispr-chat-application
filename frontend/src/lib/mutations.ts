@@ -131,3 +131,57 @@ export const ME_QUERY = /* GraphQL */ `
     }
   }
 `;
+
+// ─── For conversation ──────────────────────────────────────────────────────────────────
+
+export const FIND_USER_BY_EMAIL_QUERY = /* GraphQL */ `
+  query FindUserByEmail($email: String!) {
+    findUserByEmail(email: $email) { id name email avatar }
+  }
+`;
+
+export const CONVERSATIONS_QUERY = /* GraphQL */ `
+  query Conversations {
+    conversations {
+      partner { id name email avatar }
+      lastMessage { id content createdAt read sender { id } }
+      unreadCount
+    }
+  }
+`;
+
+export const MESSAGES_QUERY = /* GraphQL */ `
+  query Messages($withUserId: ID!, $limit: Int) {
+    messages(withUserId: $withUserId, limit: $limit) {
+      id content createdAt read
+      sender { id name avatar }
+      receiver { id name avatar }
+    }
+  }
+`;
+
+export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
+  mutation SendMessage($receiverId: ID!, $content: String!) {
+    sendMessage(receiverId: $receiverId, content: $content) {
+      id content createdAt read
+      sender { id name avatar }
+      receiver { id name avatar }
+    }
+  }
+`;
+
+export const MARK_CONVERSATION_READ_MUTATION = /* GraphQL */ `
+  mutation MarkConversationRead($withUserId: ID!) {
+    markConversationRead(withUserId: $withUserId)
+  }
+`;
+
+export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
+  subscription MessageReceived {
+    messageReceived {
+      id content createdAt read
+      sender { id name avatar }
+      receiver { id name avatar }
+    }
+  }
+`;

@@ -29,10 +29,29 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     message: String!
   }
 
+  type Message {
+    id: ID!
+    sender: User!
+    receiver: User!
+    content: String!
+    read: Boolean!
+    createdAt: DateTime!
+  }
+
+  type Conversation {
+    partner: User!
+    lastMessage: Message
+    unreadCount: Int!
+  }
+
   # ─── Query ───────────────────────────────────────────────────────────────────
   type Query {
     """Returns the currently authenticated user."""
     me: User
+
+    findUserByEmail(email: String!): User
+    conversations: [Conversation!]!
+    messages(withUserId: ID!, limit: Int): [Message!]!
 
   }
 
@@ -90,5 +109,16 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     Update the logged-in user's profile.
     """
     updateProfile(name: String, avatar: String): User!
+
+
+    # ── Message ────────────────────────────────────────────────────────────────────
+    sendMessage(receiverId: ID!, content: String!): Message!
+    markConversationRead(withUserId: ID!): Boolean!
+  }
+
+
+  # ── SUBSCRIPTION ────────────────────────────────────────────────────────────────────
+  type Subscription {
+    messageReceived: Message!
   }
 `;
