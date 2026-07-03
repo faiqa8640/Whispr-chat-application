@@ -197,3 +197,22 @@ export const MESSAGES_READ_SUBSCRIPTION = /* GraphQL */ `
     }
   }
 `;
+
+// Fires whenever any user (that this client happens to know about — a
+// sidebar contact or the person in the open chat) updates their profile,
+// so avatars/names can update live like WhatsApp instead of requiring a
+// manual refresh.
+export const USER_UPDATED_SUBSCRIPTION = /* GraphQL */ `
+  subscription UserUpdated {
+    userUpdated {
+      id
+      name
+      email
+      provider
+      avatar
+      isVerified
+      createdAt
+      updatedAt
+    }
+  }
+`;

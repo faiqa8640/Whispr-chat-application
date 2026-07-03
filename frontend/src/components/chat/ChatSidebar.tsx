@@ -4,6 +4,7 @@ import { gql } from "../../lib/gqlClient";
 import { CONVERSATIONS_QUERY } from "../../lib/mutations";
 import { useAuth } from "../../context/AuthContext";
 import { useMessageSubscription } from "../../lib/useMessageSubscription";
+import { useUserUpdatedSubscription } from "../../lib/useUserUpdatedSubscription";
 import NewMessageModal from "./NewMessageModal";
 import MessageTicks from "./MessageTicks";
 
@@ -16,6 +17,7 @@ interface ConversationItem {
 // Every avatar uses the same dark-purple gradient as sent message bubbles
 // (whispr-coral → whispr-crimson) so avatars and "your" bubbles read as
 // one consistent brand color instead of a different shade per person.
+// Only used as a fallback when the person has no uploaded photo.
 function auraFor(_name: string) {
   return "linear-gradient(135deg, #A06CD5, #815AC0)";
 }
@@ -58,6 +60,19 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
     loadConversations();
   });
 
+  // Live profile updates — WhatsApp-style: if a person you're chatting with
+  // changes their name or photo, patch it into the list in place instead of
+  // waiting for a refresh / re-fetch.
+  useUserUpdatedSubscription(({ userUpdated }) => {
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.partner.id === userUpdated.id
+          ? { ...c, partner: { ...c.partner, name: userUpdated.name, avatar: userUpdated.avatar } }
+          : c
+      )
+    );
+  });
+
   const filtered = useMemo(() => {
     if (!search.trim()) return conversations;
     const q = search.trim().toLowerCase();
@@ -73,15 +88,33 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
             WHISPR
           </span>
         </div>
-        <button
-          onClick={() => setShowNewMessage(true)}
-          aria-label="New message"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-whispr-noir text-whispr-snow transition hover:bg-whispr-burgundy"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate("/settings")}
+            aria-label="Profile settings"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-linen hover:text-whispr-noir"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+              <path
+                d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 003.6 8.6a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H8a1.65 1.65 0 001-1.51V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V8a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowNewMessage(true)}
+            aria-label="New message"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-whispr-noir text-whispr-snow transition hover:bg-whispr-burgundy"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -129,7 +162,7 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
                   <button
                     onClick={() =>
                       navigate(`/chat/${c.partner.id}`, {
-                        state: { partnerName: c.partner.name },
+                        state: { partnerName: c.partner.name, partnerAvatar: c.partner.avatar },
                       })
                     }
                     className={`group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
@@ -137,12 +170,20 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
                     }`}
                   >
                     <div className="relative shrink-0">
-                      <div
-                        className="flex h-12 w-12 items-center justify-center rounded-full font-display text-base font-semibold text-white shadow-sm"
-                        style={{ background: auraFor(c.partner.name) }}
-                      >
-                        {initialsFor(c.partner.name)}
-                      </div>
+                      {c.partner.avatar ? (
+                        <img
+                          src={c.partner.avatar}
+                          alt={c.partner.name}
+                          className="h-12 w-12 rounded-full object-cover shadow-sm"
+                        />
+                      ) : (
+                        <div
+                          className="flex h-12 w-12 items-center justify-center rounded-full font-display text-base font-semibold text-white shadow-sm"
+                          style={{ background: auraFor(c.partner.name) }}
+                        >
+                          {initialsFor(c.partner.name)}
+                        </div>
+                      )}
                     </div>
 
                     <div className="min-w-0 flex-1">

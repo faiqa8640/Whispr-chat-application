@@ -133,5 +133,11 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
   type Subscription {
     messageReceived: Message!
     messagesRead: MessagesReadPayload!
+    """
+    Emitted whenever any user updates their profile (name and/or avatar),
+    so other clients currently viewing that user (sidebar row or an open
+    chat) can update live without a refresh.
+    """
+    userUpdated: User!
   }
 `;

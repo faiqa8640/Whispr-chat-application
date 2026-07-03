@@ -1,13 +1,14 @@
-import { PubSub, withFilter } from "graphql-subscriptions";
+import { withFilter } from "graphql-subscriptions";
 import Message from "../../models/Message.js";
 import User from "../../models/User.js";
 import { AuthContext, requireAuth } from "../../middleware/authContext.js";
 import { formatUser } from "./authResolvers.js";
 import type { IUser } from "../../models/User.js";
+import { pubsub, EVENTS } from "../pubsub.js";
 
-export const pubsub = new PubSub();// annoucement chanel/ notification sysytem
-const MESSAGE_RECEIVED = "MESSAGE_RECEIVED";// event
-const MESSAGES_READ = "MESSAGES_READ";// event: someone marked a conversation as read
+// Re-exported so anything that previously imported `pubsub` from this file
+// (e.g. tests) keeps working — it's now just the shared instance.
+export { pubsub };
 
 function formatMessage(msg: any) {
   return {
@@ -115,7 +116,7 @@ export const messageResolvers = {
       const populated = await message.populate<{ sender: any; receiver: any }>(["sender", "receiver"]);
       const formatted = formatMessage(populated);
 
-      pubsub.publish(MESSAGE_RECEIVED, { messageReceived: formatted });
+      pubsub.publish(EVENTS.MESSAGE_RECEIVED, { messageReceived: formatted });
       return formatted;
     },
 
@@ -133,7 +134,7 @@ export const messageResolvers = {
       // Only notify the sender if something actually just became "read" —
       // avoids firing an event every time a conversation is simply opened.
       if (result.modifiedCount > 0) {
-        pubsub.publish(MESSAGES_READ, {
+        pubsub.publish(EVENTS.MESSAGES_READ, {
           messagesRead: {
             readerId: me._id.toString(),
             conversationWith: withUserId,
@@ -148,7 +149,7 @@ export const messageResolvers = {
   Subscription: {
     messageReceived: {
       subscribe: withFilter(
-        () => pubsub.asyncIterableIterator([MESSAGE_RECEIVED]),
+        () => pubsub.asyncIterableIterator([EVENTS.MESSAGE_RECEIVED]),
         (
           payload: { messageReceived: ReturnType<typeof formatMessage> } | undefined,
           _args: unknown,
@@ -170,7 +171,7 @@ export const messageResolvers = {
 
     messagesRead: {
       subscribe: withFilter(
-        () => pubsub.asyncIterableIterator([MESSAGES_READ]),
+        () => pubsub.asyncIterableIterator([EVENTS.MESSAGES_READ]),
         (
           payload:
             | { messagesRead: { readerId: string; conversationWith: string } }
@@ -186,6 +187,29 @@ export const messageResolvers = {
 
           // Only the original sender (whose messages were just read) needs this.
           return payload.messagesRead.conversationWith === userId;
+        }
+      ),
+    },
+
+    // Fires whenever any user updates their profile (name/avatar). Broadcast
+    // to every other connected client — mirrors the simplicity of the
+    // messageReceived/messagesRead pattern above. The client only acts on
+    // this if the updated user happens to be someone they're currently
+    // looking at (sidebar row or open chat), so there's no correctness
+    // issue with broadcasting more broadly than strictly necessary.
+    userUpdated: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterableIterator([EVENTS.USER_UPDATED]),
+        (
+          payload: { userUpdated: ReturnType<typeof formatUser> } | undefined,
+          _args: unknown,
+          context: { user: IUser | null } | undefined
+        ) => {
+          if (!payload) return false;
+          if (!context?.user) return false;
+          // Skip echoing back to the user who made the change — their own
+          // screen already updated from the mutation's return value.
+          return payload.userUpdated.id !== context.user._id.toString();
         }
       ),
     },

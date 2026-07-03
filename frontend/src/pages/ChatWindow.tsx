@@ -9,6 +9,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useMessageSubscription } from "../lib/useMessageSubscription";
 import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
+import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
 
 interface MessageItem {
@@ -23,6 +24,7 @@ interface MessageItem {
 // Every avatar uses the same dark-purple gradient as sent message bubbles
 // (whispr-coral → whispr-crimson) so avatars and "your" bubbles read as
 // one consistent brand color instead of a different shade per person.
+// Only used as a fallback when the person has no uploaded photo.
 function auraFor(_name: string) {
   return "linear-gradient(135deg, #A06CD5, #815AC0)";
 }
@@ -55,6 +57,7 @@ export default function ChatWindow() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [partnerName, setPartnerName] = useState("");
+  const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   async function loadMessages() {
@@ -66,7 +69,9 @@ export default function ChatWindow() {
     setMessages(data.messages);
     const withPartner = data.messages.find((m) => m.sender.id === userId || m.receiver.id === userId);
     if (withPartner) {
-      setPartnerName(withPartner.sender.id === userId ? withPartner.sender.name : withPartner.receiver.name);
+      const partner = withPartner.sender.id === userId ? withPartner.sender : withPartner.receiver;
+      setPartnerName(partner.name);
+      setPartnerAvatar(partner.avatar);
     }
     setLoading(false);
     await gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId });
@@ -75,11 +80,12 @@ export default function ChatWindow() {
   useEffect(() => {
     setLoading(true);
     // If we arrived here via the sidebar / new-message modal, the partner's
-    // name was passed in router state — use it immediately instead of
-    // waiting on loadMessages(), which can't find a name from an empty
-    // (brand-new) conversation's message list.
-    const stateName = (location.state as { partnerName?: string } | null)?.partnerName;
-    setPartnerName(stateName ?? "");
+    // name (and avatar) was passed in router state — use it immediately
+    // instead of waiting on loadMessages(), which can't find a name/avatar
+    // from an empty (brand-new) conversation's message list.
+    const state = location.state as { partnerName?: string; partnerAvatar?: string | null } | null;
+    setPartnerName(state?.partnerName ?? "");
+    setPartnerAvatar(state?.partnerAvatar ?? null);
     loadMessages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
@@ -109,6 +115,15 @@ export default function ChatWindow() {
     setMessages((prev) => prev.map((m) => (m.sender.id === user?.id ? { ...m, read: true } : m)));
   });
 
+  // Live profile updates — WhatsApp-style: if the person you're chatting
+  // with changes their name or photo mid-conversation, patch the header
+  // immediately instead of waiting for a refresh.
+  useUserUpdatedSubscription(({ userUpdated }) => {
+    if (userUpdated.id !== userId) return;
+    setPartnerName(userUpdated.name);
+    setPartnerAvatar(userUpdated.avatar);
+  });
+
   async function handleSend() {
     if (!draft.trim() || !userId) return;
     const content = draft.trim();
@@ -120,9 +135,11 @@ export default function ChatWindow() {
     setMessages((prev) =>
       prev.some((m) => m.id === data.sendMessage.id) ? prev : [...prev, data.sendMessage]
     );
-    // Safety net: if we still don't have a partner name (e.g. state was lost
-    // on a refresh mid-conversation), the send response always carries it.
+    // Safety net: if we still don't have a partner name/avatar (e.g. state
+    // was lost on a refresh mid-conversation), the send response always
+    // carries it.
     setPartnerName((prev) => prev || data.sendMessage.receiver.name);
+    setPartnerAvatar((prev) => prev ?? data.sendMessage.receiver.avatar);
   }
 
   if (loading) {
@@ -153,12 +170,20 @@ export default function ChatWindow() {
             <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <div
-          className="flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-semibold text-white"
-          style={{ background: auraFor(partnerName || "?") }}
-        >
-          {partnerName ? initialsFor(partnerName) : "?"}
-        </div>
+        {partnerAvatar ? (
+          <img
+            src={partnerAvatar}
+            alt={partnerName || "?"}
+            className="h-10 w-10 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-semibold text-white"
+            style={{ background: auraFor(partnerName || "?") }}
+          >
+            {partnerName ? initialsFor(partnerName) : "?"}
+          </div>
+        )}
         <h1 className="font-display text-lg font-semibold text-whispr-noir">{partnerName}</h1>
       </div>
 

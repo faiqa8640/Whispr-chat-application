@@ -15,6 +15,11 @@ declare const google: {
   };
 };
 
+// Module-level guard: React 19 StrictMode double-invokes effects in dev,
+// which would otherwise call google.accounts.id.initialize() twice and
+// trigger Google's "initialize() called multiple times" console warning.
+let googleInitialized = false;
+
 export default function Login() {
   const navigate = useNavigate();
   const { setUser } = useAuth();
@@ -55,10 +60,15 @@ export default function Login() {
         return;
       }
 
-      google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleGoogleCredential,
-      });
+      // Only call initialize() once per page load, even if this effect
+      // runs twice (StrictMode) or the component remounts.
+      if (!googleInitialized) {
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleGoogleCredential,
+        });
+        googleInitialized = true;
+      }
 
       // GOOGLE GENARTE THE BUTTON INSTEAD OF DEISGINING IT YOURSELF 
       const btn = document.getElementById("google-signin-btn");

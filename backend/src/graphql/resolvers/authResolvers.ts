@@ -13,6 +13,7 @@ import {
 } from "../../utils/token.js";
 import { sendOtpEmail, sendPasswordResetEmail } from "../../utils/mailer.js";
 import { AuthContext, requireAuth } from "../../middleware/authContext.js";
+import { pubsub, EVENTS } from "../pubsub";
 
 const googleClient = new OAuth2Client(ENV.GOOGLE_CLIENT_ID);
 
@@ -304,7 +305,14 @@ export const authResolvers = {
       // password not touched — hook won't fire
       await user.save();
 
-      return formatUser(user);
+      const formatted = formatUser(user);
+
+      // Push the change to anyone else currently connected (e.g. someone
+      // with a chat open with this user) so their sidebar/header avatar and
+      // name update live, WhatsApp-style, without a refresh.
+      pubsub.publish(EVENTS.USER_UPDATED, { userUpdated: formatted });
+
+      return formatted;
     },
   },
 };

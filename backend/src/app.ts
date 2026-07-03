@@ -16,7 +16,11 @@ export async function createApp() {
 
   app.use(cors({ origin: ENV.CLIENT_URL, credentials: true }));
   app.use(cookieParser());
-  app.use(express.json());
+  // Default Express JSON limit is 100kb, which is too small for base64-encoded
+  // avatar images sent via the updateProfile mutation. The frontend already
+  // crops/compresses avatars to a small square before sending, but this limit
+  // is raised as a safety net (e.g. someone bypassing the client-side crop).
+  app.use(express.json({ limit: "3mb" }));
 
   const apollo = new ApolloServer({
     schema,
