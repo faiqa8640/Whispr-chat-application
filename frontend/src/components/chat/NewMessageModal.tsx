@@ -7,7 +7,7 @@ export default function NewMessageModal({
   onFound,
 }: {
   onClose: () => void;
-  onFound: (partnerId: string) => void;
+  onFound: (partnerId: string, partnerName: string) => void;
 }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
@@ -22,7 +22,7 @@ export default function NewMessageModal({
     }
     setIsSearching(true);
     try {
-      const data = await gql<{ findUserByEmail: { id: string } | null }>(
+      const data = await gql<{ findUserByEmail: { id: string; name: string } | null }>(
         FIND_USER_BY_EMAIL_QUERY,
         { email: email.trim() }
       );
@@ -30,7 +30,7 @@ export default function NewMessageModal({
         setError("No Whispr user found with that email.");
         return;
       }
-      onFound(data.findUserByEmail.id);
+      onFound(data.findUserByEmail.id, data.findUserByEmail.name);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

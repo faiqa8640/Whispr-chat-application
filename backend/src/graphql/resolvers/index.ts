@@ -1,16 +1,3 @@
-// import { authResolvers } from "./authResolvers.js";
-
-// export const resolvers = {
-//   Query: {
-//     ...authResolvers.Query,
-//   },
-//   Mutation: {
-//     ...authResolvers.Mutation,
-//   },
-// };
-
-
-
 import { authResolvers } from "./authResolvers.js";
 import { messageResolvers } from "./messageResolvers.js";
 

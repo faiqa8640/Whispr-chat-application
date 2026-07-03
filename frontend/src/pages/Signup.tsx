@@ -53,14 +53,14 @@ export default function Signup() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-88px)] bg-whispr-snow">
+    <div className="flex h-screen bg-whispr-snow">
       <AuthBrandPanel
         quote="Say less. Mean more."
         body="Join Whispr and start conversations that actually matter."
       />
 
       {/* Right — form panel */}
-      <div className="flex w-full flex-col items-center justify-center px-6 py-14 lg:w-1/2">
+      <div className="flex w-full flex-col items-center justify-center overflow-y-auto px-6 py-14 lg:w-1/2">
         <div className="mx-auto w-full max-w-sm">
           <Link to="/" className="mb-7 flex flex-col items-center lg:hidden">
             <span className="font-display text-3xl font-semibold tracking-widest2 text-whispr-noir">

@@ -98,7 +98,7 @@ export default function VerifyOtp() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-88px)] items-center justify-center bg-whispr-snow px-6 py-16">
+    <div className="flex h-screen items-center justify-center overflow-y-auto bg-whispr-snow px-6 py-16">
       <div className="mx-auto w-full max-w-sm">
         <Link to="/" className="mb-10 flex flex-col items-center">
           <span className="font-display text-3xl font-semibold tracking-widest2 text-whispr-noir">

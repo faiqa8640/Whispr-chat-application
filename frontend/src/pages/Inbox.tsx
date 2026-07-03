@@ -1,90 +1,27 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { gql } from "../lib/gqlClient";
-import { CONVERSATIONS_QUERY } from "../lib/mutations";
-import NewMessageModal from "../components/chat/NewMessageModal";
-import { useMessageSubscription } from "../lib/useMessageSubscription";
-
-interface ConversationItem {
-  partner: { id: string; name: string; email: string; avatar: string | null };
-  lastMessage: { content: string } | null;
-  unreadCount: number;
+export default function Inbox() {
+  return (
+    <div className="flex h-full flex-1 flex-col items-center justify-center bg-whispr-snow px-10 text-center">
+      <ChatBubbles className="h-40 w-40 text-whispr-rose" />
+      <h1 className="mt-6 font-display text-3xl font-semibold text-whispr-noir">
+        Speak softly. Connect deeply.
+      </h1>
+      <p className="mt-2 max-w-xs font-body text-sm text-whispr-mauve">
+        Select a conversation from the left, or start a new one, to begin chatting.
+      </p>
+    </div>
+  );
 }
 
-export default function Inbox() {
-  const navigate = useNavigate();
-  const [conversations, setConversations] = useState<ConversationItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showNewMessage, setShowNewMessage] = useState(false);
-
-  async function loadConversations() {
-    const data = await gql<{ conversations: ConversationItem[] }>(CONVERSATIONS_QUERY);
-    setConversations(data.conversations);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  useMessageSubscription(() => {
-    loadConversations();
-  });
-
+function ChatBubbles({ className }: { className?: string }) {
   return (
-    <div className="min-h-[calc(100vh-88px)] bg-whispr-snow px-6 py-10">
-      <div className="mx-auto max-w-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="font-display text-3xl font-semibold text-whispr-noir">Inbox</h1>
-          <button
-            onClick={() => setShowNewMessage(true)}
-            className="rounded-full bg-whispr-coral px-5 py-2.5 font-body text-sm font-semibold uppercase tracking-wider text-white hover:bg-whispr-crimson"
-          >
-            Send New Message
-          </button>
-        </div>
-
-        {loading ? (
-          <p className="font-body text-sm text-whispr-mauve">Loading conversations…</p>
-        ) : conversations.length === 0 ? (
-          <p className="font-body text-sm text-whispr-mauve">
-            No conversations yet. Send your first message to get started.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {conversations.map((c) => (
-              <li key={c.partner.id}>
-                <button
-                  onClick={() => navigate(`/chat/${c.partner.id}`)}
-                  className="flex w-full items-center justify-between rounded-lg border border-whispr-rose/30 bg-white px-4 py-3.5 text-left shadow-sm transition hover:border-whispr-coral/50"
-                >
-                  <div>
-                    <p className="font-body text-sm font-semibold text-whispr-noir">{c.partner.name}</p>
-                    <p className="mt-0.5 line-clamp-1 font-body text-xs text-whispr-mauve">
-                      {c.lastMessage?.content ?? "No messages yet"}
-                    </p>
-                  </div>
-                  {c.unreadCount > 0 && (
-                    <span className="ml-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-whispr-coral px-1.5 font-body text-[11px] font-semibold text-white">
-                      {c.unreadCount}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {showNewMessage && (
-        <NewMessageModal
-          onClose={() => setShowNewMessage(false)}
-          onFound={(partnerId) => {
-            setShowNewMessage(false);
-            navigate(`/chat/${partnerId}`);
-          }}
-        />
-      )}
-    </div>
+    <svg viewBox="0 0 200 160" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+      <rect x="20" y="20" width="120" height="60" rx="18" stroke="currentColor" strokeWidth="2.5" />
+      <path d="M60 80 Q50 96 34 100 Q46 88 46 80Z" fill="currentColor" opacity="0.5" />
+      <rect x="60" y="90" width="120" height="52" rx="16" stroke="currentColor" strokeWidth="2.2" opacity="0.8" />
+      <path d="M150 142 Q160 156 176 158 Q164 148 164 142Z" fill="currentColor" opacity="0.4" />
+      <circle cx="45" cy="45" r="3" fill="currentColor" opacity="0.6" />
+      <circle cx="60" cy="45" r="3" fill="currentColor" opacity="0.6" />
+      <circle cx="75" cy="45" r="3" fill="currentColor" opacity="0.6" />
+    </svg>
   );
 }

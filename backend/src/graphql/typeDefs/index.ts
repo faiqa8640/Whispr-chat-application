@@ -44,6 +44,18 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     unreadCount: Int!
   }
 
+  """
+  Emitted when someone opens a conversation and their unread messages
+  get marked as read, so the original sender's client can flip their
+  tick marks live instead of waiting for a refresh.
+  """
+  type MessagesReadPayload {
+    """The id of the person who just read the messages."""
+    readerId: ID!
+    """The id of the person whose messages were marked as read (the original sender)."""
+    conversationWith: ID!
+  }
+
   # ─── Query ───────────────────────────────────────────────────────────────────
   type Query {
     """Returns the currently authenticated user."""
@@ -120,5 +132,6 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
   # ── SUBSCRIPTION ────────────────────────────────────────────────────────────────────
   type Subscription {
     messageReceived: Message!
+    messagesRead: MessagesReadPayload!
   }
 `;

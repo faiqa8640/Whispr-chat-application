@@ -5,8 +5,9 @@ import { AuthContext, requireAuth } from "../../middleware/authContext.js";
 import { formatUser } from "./authResolvers.js";
 import type { IUser } from "../../models/User.js";
 
-export const pubsub = new PubSub();
-const MESSAGE_RECEIVED = "MESSAGE_RECEIVED";
+export const pubsub = new PubSub();// annoucement chanel/ notification sysytem
+const MESSAGE_RECEIVED = "MESSAGE_RECEIVED";// event
+const MESSAGES_READ = "MESSAGES_READ";// event: someone marked a conversation as read
 
 function formatMessage(msg: any) {
   return {
@@ -21,18 +22,25 @@ function formatMessage(msg: any) {
 
 export const messageResolvers = {
   Query: {
+    // This lets a logged-in user search for another user by email.
+    // parent->unknown or unused, arg->email(by frontend), ctx->authenticated request context 
     findUserByEmail: async (_: unknown, { email }: { email: string }, ctx: AuthContext) => {
-      requireAuth(ctx);
+      requireAuth(ctx);//This prevents anonymous users from searching your user database.
       const user = await User.findOne({ email: email.toLowerCase() });
       return user ? formatUser(user) : null;
     },
 
+    // this gets the chat history 
     conversations: async (_: unknown, __: unknown, ctx: AuthContext) => {
       const me = requireAuth(ctx);
       const userId = me._id;
+      // gets the currentky logined user
 
+      // uses the aggregation pipeline-> coz complex
       const results = await Message.aggregate([
+        // check every msg where the user is either sender or recevier
         { $match: { $or: [{ sender: userId }, { receiver: userId }] } },
+        // sort the newest msgs first -> -1 means desending order
         { $sort: { createdAt: -1 } },
         {
           $group: {
@@ -117,10 +125,22 @@ export const messageResolvers = {
       ctx: AuthContext
     ) => {
       const me = requireAuth(ctx);
-      await Message.updateMany(
+      const result = await Message.updateMany(
         { sender: withUserId, receiver: me._id, read: false },
         { $set: { read: true } }
       );
+
+      // Only notify the sender if something actually just became "read" —
+      // avoids firing an event every time a conversation is simply opened.
+      if (result.modifiedCount > 0) {
+        pubsub.publish(MESSAGES_READ, {
+          messagesRead: {
+            readerId: me._id.toString(),
+            conversationWith: withUserId,
+          },
+        });
+      }
+
       return true;
     },
   },
@@ -144,6 +164,28 @@ export const messageResolvers = {
             payload.messageReceived.sender.id === userId ||
             payload.messageReceived.receiver.id === userId
           );
+        }
+      ),
+    },
+
+    messagesRead: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterableIterator([MESSAGES_READ]),
+        (
+          payload:
+            | { messagesRead: { readerId: string; conversationWith: string } }
+            | undefined,
+          _args: unknown,
+          context: { user: IUser | null } | undefined
+        ) => {
+          if (!payload) return false;
+          if (!context) return false;
+
+          const userId = context.user?._id?.toString();
+          if (!userId) return false;
+
+          // Only the original sender (whose messages were just read) needs this.
+          return payload.messagesRead.conversationWith === userId;
         }
       ),
     },

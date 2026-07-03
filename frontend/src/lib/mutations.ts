@@ -185,3 +185,15 @@ export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
     }
   }
 `;
+
+// Fires when someone marks their conversation with you as read — this is
+// what actually lets your sent-message ticks turn gold for real, instead
+// of the old (buggy) guess of "you just sent something so mark it read".
+export const MESSAGES_READ_SUBSCRIPTION = /* GraphQL */ `
+  subscription MessagesRead {
+    messagesRead {
+      readerId
+      conversationWith
+    }
+  }
+`;
