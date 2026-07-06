@@ -21,7 +21,7 @@ export function useReadReceiptSubscription(onData: (data: ReadReceiptData) => vo
         next: (result) => {
           if (result.data) onDataRef.current(result.data as unknown as ReadReceiptData);
         },
-        error: (err) => console.error("Read receipt subscription error:", err),
+        error: (err) => console.error("Read receipt subscription error:", err),// handle the error if any error occurs
         complete: () => {},
       }
     );

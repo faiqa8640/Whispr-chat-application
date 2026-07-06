@@ -6,6 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useMessageSubscription } from "../../lib/useMessageSubscription";
 import { useUserUpdatedSubscription } from "../../lib/useUserUpdatedSubscription";
 import { useMessageUnsentSubscription } from "../../lib/useMessageUnsentSubscription";
+import { useReadReceiptSubscription } from "../../lib/useReadReceiptSubscription";
 import NewMessageModal from "./NewMessageModal";
 import MessageTicks from "./MessageTicks";
 
@@ -140,6 +141,24 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
       prev.map((c) =>
         c.lastMessage?.id === messageUnsent.id
           ? { ...c, lastMessage: { ...c.lastMessage, deleted: true, content: "" } }
+          : c
+      )
+    );
+  });
+
+  // Real "seen" signal for the sidebar preview row — mirrors what
+  // ChatWindow does for the open conversation. Without this, the
+  // sidebar tick only turns blue/violet after a full loadConversations()
+  // refetch (e.g. on remount), even though the actual chat already
+  // shows it as read.
+  useReadReceiptSubscription(({ messagesRead }) => {
+    // readerId is the partner who just read your messages (the person
+    // whose sidebar row this is); conversationWith is you (the original
+    // sender) and isn't useful for matching a row here.
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.partner.id === messagesRead.readerId && c.lastMessage
+          ? { ...c, lastMessage: { ...c.lastMessage, read: true } }
           : c
       )
     );

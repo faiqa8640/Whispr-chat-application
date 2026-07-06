@@ -19,6 +19,8 @@ const MAX_SOURCE_FILE_BYTES = 15 * 1024 * 1024; // sanity cap on the *original* 
  * resolution/size — a 12MP phone photo and a tiny screenshot both end up
  * as the same small square.
  */
+
+// This function takes an image file selected by the user, makes it a center-cropped square avatar, compresses it as a JPEG, and returns it as a Base64 data URL string.
 function cropAndCompressToSquare(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
@@ -27,11 +29,11 @@ function cropAndCompressToSquare(file: File): Promise<string> {
     img.onload = () => {
       URL.revokeObjectURL(objectUrl);
 
-      const side = Math.min(img.width, img.height);
+      const side = Math.min(img.width, img.height); //crop the image
       const sx = (img.width - side) / 2;
       const sy = (img.height - side) / 2;
 
-      const canvas = document.createElement("canvas");
+      const canvas = document.createElement("canvas");//send it to thhe canva evatar side
       canvas.width = AVATAR_SIZE;
       canvas.height = AVATAR_SIZE;
       const ctx = canvas.getContext("2d");
@@ -46,7 +48,7 @@ function cropAndCompressToSquare(file: File): Promise<string> {
       ctx.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
       ctx.drawImage(img, sx, sy, side, side, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
 
-      resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+      resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));// return the image as yeh jpeg
     };
 
     img.onerror = () => {
