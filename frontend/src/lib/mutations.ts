@@ -189,6 +189,12 @@ export const UNSEND_MESSAGE_MUTATION = /* GraphQL */ `
   }
 `;
 
+export const SET_TYPING_MUTATION = /* GraphQL */ `
+  mutation SetTyping($receiverId: ID!, $isTyping: Boolean!) {
+    setTyping(receiverId: $receiverId, isTyping: $isTyping)
+  }
+`;
+
 export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageReceived {
     messageReceived {
@@ -240,6 +246,19 @@ export const MESSAGE_UNSENT_SUBSCRIPTION = /* GraphQL */ `
       id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
+    }
+  }
+`;
+
+
+// Fires when the person you're chatting with starts/stops typing —
+// Instagram/WhatsApp-style live "..." indicator.
+export const TYPING_STATUS_SUBSCRIPTION = /* GraphQL */ `
+  subscription TypingStatus {
+    typingStatus {
+      userId
+      receiverId
+      isTyping
     }
   }
 `;

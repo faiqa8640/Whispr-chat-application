@@ -73,6 +73,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     conversationWith: ID!
   }
 
+  type TypingStatus {
+    userId: ID!
+    receiverId: ID!
+    isTyping: Boolean!
+  }
+
   # ─── Query ───────────────────────────────────────────────────────────────────
   type Query {
     """Returns the currently authenticated user."""
@@ -153,8 +159,14 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     and marks it deleted — like Instagram's "Unsend".
     """
     unsendMessage(messageId: ID!): Message!
-  }
 
+
+    """
+    Notify the other participant that you started/stopped typing in a
+    conversation — Instagram/WhatsApp-style live typing indicator.
+    """
+    setTyping(receiverId: ID!, isTyping: Boolean!): Boolean!
+  }
 
   # ── SUBSCRIPTION ────────────────────────────────────────────────────────────────────
   type Subscription {
@@ -172,5 +184,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     client can immediately swap the bubble for the "unsent" placeholder.
     """
     messageUnsent: Message!
+
+    """
+    Emitted when someone starts/stops typing to you, so your client can
+    show the animated "..." indicator in real time.
+    """
+    typingStatus: TypingStatus!
   }
 `;
+

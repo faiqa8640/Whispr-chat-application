@@ -6,12 +6,14 @@ import {
   SEND_MESSAGE_MUTATION,
   MARK_CONVERSATION_READ_MUTATION,
   UNSEND_MESSAGE_MUTATION,
+  SET_TYPING_MUTATION,
 } from "../lib/mutations";
 import { useAuth } from "../context/AuthContext";
 import { useMessageSubscription } from "../lib/useMessageSubscription";
 import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
 import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
 import { useMessageUnsentSubscription } from "../lib/useMessageUnsentSubscription";
+import { useTypingSubscription } from "../lib/useTypingSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
 
 interface MessageItem {
@@ -29,6 +31,10 @@ interface MessageItem {
     sender: { id: string; name: string; avatar: string | null };
   } | null;
 }
+
+// How long to wait after the last keystroke before telling the server
+// "stopped typing" — same ballpark as WhatsApp/Instagram.
+const TYPING_STOP_DELAY_MS = 2000;
 
 // Every avatar uses the same dark-purple gradient as sent message bubbles
 // (whispr-coral → whispr-crimson) so avatars and "your" bubbles read as
@@ -73,8 +79,58 @@ export default function ChatWindow() {
   // Briefly highlighted after jumping to a message via its quoted preview,
   // so the person can actually spot which bubble they landed on.
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // Whether the person we're chatting with is currently typing to us —
+  // Instagram-style animated "..." bubble at the bottom of the thread.
+  const [partnerTyping, setPartnerTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Typing-notification bookkeeping. isTypingActiveRef avoids sending a
+  // "started typing" mutation on every keystroke — only the first
+  // keystroke of a burst sends it; the debounce timeout later sends
+  // "stopped typing" once the person pauses.
+  const isTypingActiveRef = useRef(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function sendTyping(isTyping: boolean) {
+    if (!userId) return;
+    gql(SET_TYPING_MUTATION, { receiverId: userId, isTyping }).catch(() => {});
+  }
+
+  function stopTypingNow() {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (isTypingActiveRef.current) {
+      isTypingActiveRef.current = false;
+      sendTyping(false);
+    }
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    if (!userId) return;
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (!value.trim()) {
+      // Cleared the input entirely — stop immediately instead of waiting
+      // out the debounce delay.
+      stopTypingNow();
+      return;
+    }
+
+    if (!isTypingActiveRef.current) {
+      isTypingActiveRef.current = true;
+      sendTyping(true);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingActiveRef.current = false;
+      sendTyping(false);
+    }, TYPING_STOP_DELAY_MS);
+  }
 
   async function loadMessages() {
     if (!userId) return;
@@ -102,13 +158,21 @@ export default function ChatWindow() {
     const state = location.state as { partnerName?: string; partnerAvatar?: string | null } | null;
     setPartnerName(state?.partnerName ?? "");
     setPartnerAvatar(state?.partnerAvatar ?? null);
+    // Switching conversations — any stale typing state doesn't apply here.
+    setPartnerTyping(false);
     loadMessages();
+
+    // Leaving/changing a conversation while mid-keystroke shouldn't leave
+    // the other person thinking we're still typing forever.
+    return () => {
+      stopTypingNow();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, partnerTyping]);
 
   useMessageSubscription((data) => {
     const msg = data.messageReceived as MessageItem;
@@ -118,6 +182,9 @@ export default function ChatWindow() {
 
     if (isThisConversation) {
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      // A message just arrived, so the "typing..." bubble is stale —
+      // clear it instead of waiting for an explicit stop event.
+      if (msg.sender.id === userId) setPartnerTyping(false);
       if (msg.sender.id !== user?.id) {
         gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId }).catch(() => {});
       }
@@ -129,6 +196,13 @@ export default function ChatWindow() {
   useReadReceiptSubscription(({ messagesRead }) => {
     if (messagesRead.readerId !== userId) return; // a read receipt from a different chat
     setMessages((prev) => prev.map((m) => (m.sender.id === user?.id ? { ...m, read: true } : m)));
+  });
+
+  // Live typing indicator — Instagram/WhatsApp-style. Only react to events
+  // from the person we're actually chatting with right now.
+  useTypingSubscription(({ typingStatus }) => {
+    if (typingStatus.userId !== userId) return;
+    setPartnerTyping(typingStatus.isTyping);
   });
 
   // Live profile updates — WhatsApp-style: if the person you're chatting
@@ -170,6 +244,9 @@ export default function ChatWindow() {
     const replyToId = replyingTo?.id;
     setDraft("");
     setReplyingTo(null);
+    // Sending resolves the "typing" state immediately — no need to wait
+    // out the debounce timer.
+    stopTypingNow();
     const data = await gql<{ sendMessage: MessageItem }>(SEND_MESSAGE_MUTATION, {
       receiverId: userId,
       content,
@@ -245,7 +322,15 @@ export default function ChatWindow() {
             {partnerName ? initialsFor(partnerName) : "?"}
           </div>
         )}
-        <h1 className="font-display text-lg font-semibold text-whispr-noir">{partnerName}</h1>
+        <div className="flex flex-col">
+          <h1 className="font-display text-lg font-semibold leading-tight text-whispr-noir">
+            {partnerName}
+          </h1>
+          {/* WhatsApp-style: swap the subtitle line to "typing..." while active */}
+          {partnerTyping && (
+            <span className="font-body text-xs font-medium text-whispr-coral">typing…</span>
+          )}
+        </div>
       </div>
 
       {/* Messages — subtle dotted texture like a chat backdrop */}
@@ -382,6 +467,25 @@ export default function ChatWindow() {
             </div>
           );
         })}
+
+        {/* Instagram/WhatsApp-style "typing..." bubble — rendered like a
+            received message, with three bouncing dots instead of text. */}
+        {partnerTyping && (
+          <div className="mt-3 flex justify-start">
+            <div className="relative max-w-[75%] sm:max-w-[65%]">
+              <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-white px-4 py-3 shadow-sm">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70" />
+              </div>
+              <span
+                className="absolute bottom-0 -left-1 h-3 w-3 bg-white"
+                style={{ clipPath: "polygon(100% 0, 100% 100%, 0 100%)" }}
+              />
+            </div>
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
@@ -416,7 +520,7 @@ export default function ChatWindow() {
         <div className="flex items-center gap-3">
           <input
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => handleDraftChange(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder="Type a message…"
             className="flex-1 rounded-full border border-whispr-linen bg-whispr-snow px-4 py-3 font-body text-sm text-whispr-noir placeholder:text-whispr-mauve/70 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/20"

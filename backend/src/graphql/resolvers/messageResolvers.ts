@@ -284,6 +284,27 @@ export const messageResolvers = {
       pubsub.publish(EVENTS.MESSAGE_UNSENT, { messageUnsent: formatted });//publish the event 
       return formatted;
     },
+
+    // _SET TYPING____________________________________________________
+    // Instagram/WhatsApp-style typing indicator. Fire-and-forget — no
+    // persistence, just a live pubsub event to whoever you're chatting with.
+    setTyping: async (
+      _: unknown,
+      { receiverId, isTyping }: { receiverId: string; isTyping: boolean },
+      ctx: AuthContext
+    ) => {
+      const me = requireAuth(ctx);
+
+      pubsub.publish(EVENTS.TYPING, {
+        typingStatus: {
+          userId: me._id.toString(),
+          receiverId,
+          isTyping,
+        },
+      });
+
+      return true;
+    },
   },
 
 
@@ -398,6 +419,30 @@ export const messageResolvers = {
             payload.messageUnsent.sender.id === userId ||
             payload.messageUnsent.receiver.id === userId
           );
+        }
+      ),
+    },
+
+    // _TYPING STATUS____________________________________________________
+    // Only the intended receiver needs this — filtered by receiverId,
+    // same pattern as messagesRead.
+    typingStatus: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterableIterator([EVENTS.TYPING]),
+        (
+          payload:
+            | { typingStatus: { userId: string; receiverId: string; isTyping: boolean } }
+            | undefined,
+          _args: unknown,
+          context: { user: IUser | null } | undefined
+        ) => {
+          if (!payload) return false;
+          if (!context) return false;
+
+          const userId = context.user?._id?.toString();
+          if (!userId) return false;
+
+          return payload.typingStatus.receiverId === userId;
         }
       ),
     },
