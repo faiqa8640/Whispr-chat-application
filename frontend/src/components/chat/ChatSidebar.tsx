@@ -11,7 +11,9 @@ import NewMessageModal from "./NewMessageModal";
 import MessageTicks from "./MessageTicks";
 import {
   getNotificationPermission,
+  isNotificationsEnabledByUser,
   requestNotificationPermission,
+  setNotificationsEnabledByUser,
   shouldNotify,
   showMessageNotification,
 } from "../../lib/notifications";
@@ -73,6 +75,9 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
   async function handleEnableNotifications() {
     const result = await requestNotificationPermission();
     setNotifPermission(result);
+    // Keep the Profile-settings toggle in sync — granting here should
+    // count as "on", same as flipping the switch there would.
+    if (result === "granted") setNotificationsEnabledByUser(true);
   }
 
   async function loadConversations() {
@@ -249,7 +254,7 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
 
       {/* Enable-notifications prompt — only shown when the browser supports
           it and the person hasn't already granted/denied/dismissed it */}
-      {notifPermission === "default" && !notifBannerDismissed && (
+      {notifPermission === "default" && !notifBannerDismissed && isNotificationsEnabledByUser() && (
         <div className="flex items-center justify-between gap-3 border-b border-whispr-linen bg-whispr-petal/30 px-4 py-2.5">
           <p className="font-body text-xs text-whispr-noir">
             Turn on notifications to know when new messages arrive.

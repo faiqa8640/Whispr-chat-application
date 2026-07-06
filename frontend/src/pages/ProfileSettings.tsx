@@ -3,6 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { gql } from "../lib/gqlClient";
 import { UPDATE_PROFILE_MUTATION } from "../lib/mutations";
 import { useAuth, type AuthUser } from "../context/AuthContext";
+import {
+  getNotificationPermission,
+  isNotificationsEnabledByUser,
+  isNotificationSupported,
+  requestNotificationPermission,
+  setNotificationsEnabledByUser,
+} from "../lib/notifications";
 
 // Fixed square output size (px) for the cropped avatar — same idea as
 // WhatsApp: whatever photo the user picks, we center-crop it to a square
@@ -79,6 +86,12 @@ export default function ProfileSettings() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  // Notification preference — separate from the "Save changes" form below,
+  // this applies immediately, WhatsApp-style, with no save step of its own.
+  const notificationsSupported = isNotificationSupported();
+  const [notificationsEnabled, setNotificationsEnabled] = useState(isNotificationsEnabledByUser());
+  const [notificationPermission, setNotificationPermission] = useState(getNotificationPermission());
+
   if (!user) return null; // ProtectedRoute already guards this route
 
   function handlePickFile() {
@@ -142,6 +155,32 @@ export default function ProfileSettings() {
       setError(err instanceof Error ? err.message : "Could not update profile.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleToggleNotifications() {
+    setError("");
+
+    // Turning off never needs the permission dialog — just flip the pref.
+    if (notificationsEnabled) {
+      setNotificationsEnabledByUser(false);
+      setNotificationsEnabled(false);
+      return;
+    }
+
+    // Turning on: make sure the browser actually allows it first, since
+    // flipping the in-app switch alone can't override a browser-level
+    // denial.
+    const permission = await requestNotificationPermission();
+    setNotificationPermission(permission);
+
+    if (permission === "granted") {
+      setNotificationsEnabledByUser(true);
+      setNotificationsEnabled(true);
+    } else {
+      setError(
+        "Notifications are blocked in your browser. Allow them in your browser's site settings, then try again."
+      );
     }
   }
 
@@ -255,6 +294,40 @@ export default function ProfileSettings() {
             {isSaving ? "Saving…" : "Save changes"}
           </button>
         </form>
+
+        {/* Notifications — WhatsApp-style, applies immediately, no Save needed */}
+        <div className="mt-8 flex items-center justify-between gap-4 rounded-md border border-whispr-linen bg-white px-4 py-3.5">
+          <div>
+            <p className="font-body text-sm font-semibold text-whispr-noir">Message notifications</p>
+            <p className="mt-0.5 font-body text-[11px] text-whispr-mauve/70">
+              {notificationsSupported
+                ? "Get notified when a message arrives and Whispr isn't in focus."
+                : "Not supported in this browser."}
+            </p>
+            {notificationsSupported && notificationPermission === "denied" && (
+              <p className="mt-1 font-body text-[11px] text-whispr-burgundy">
+                Blocked at the browser level — check your site settings.
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={notificationsEnabled}
+            aria-label="Toggle message notifications"
+            onClick={handleToggleNotifications}
+            disabled={!notificationsSupported}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+              notificationsEnabled ? "bg-whispr-coral" : "bg-whispr-linen"
+            }`}
+          >
+            <span
+              className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                notificationsEnabled ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
 
         <button
           onClick={handleLogout}

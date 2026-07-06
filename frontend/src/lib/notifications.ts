@@ -9,6 +9,36 @@ export function isNotificationSupported(): boolean {
   return typeof window !== "undefined" && "Notification" in window;
 }
 
+const NOTIFICATIONS_PREF_KEY = "whispr:notificationsEnabled";
+
+/**
+ * Whether the *person* wants message notifications, as opposed to whether
+ * the browser has granted permission for them. This is the WhatsApp-style
+ * in-app toggle (Profile settings), separate from the OS-level permission
+ * dialog. Defaults to true (opted-in) so nothing changes for existing
+ * users until they explicitly flip it off.
+ */
+export function isNotificationsEnabledByUser(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const stored = window.localStorage.getItem(NOTIFICATIONS_PREF_KEY);
+    return stored === null ? true : stored === "true";
+  } catch {
+    // Storage unavailable (e.g. private mode) — fall back to "on".
+    return true;
+  }
+}
+
+/** Persists the in-app notification preference set from Profile settings. */
+export function setNotificationsEnabledByUser(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(NOTIFICATIONS_PREF_KEY, String(enabled));
+  } catch {
+    // Ignore — worst case the choice doesn't persist across reloads.
+  }
+}
+
 /** Current permission state, or null if the API isn't supported at all. */
 export function getNotificationPermission(): NotificationPermission | null {
   if (!isNotificationSupported()) return null;
@@ -42,6 +72,10 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
  *  - Otherwise (visible/focused but a *different* conversation), notify.
  */
 export function shouldNotify(partnerId: string, activeId?: string): boolean {
+  // Respect the in-app toggle first — if the person turned notifications
+  // off in Profile settings, nothing below matters.
+  if (!isNotificationsEnabledByUser()) return false;
+
   const isLookingAtThisChat =
     partnerId === activeId &&
     typeof document !== "undefined" &&
