@@ -5,11 +5,13 @@ import {
   MESSAGES_QUERY,
   SEND_MESSAGE_MUTATION,
   MARK_CONVERSATION_READ_MUTATION,
+  UNSEND_MESSAGE_MUTATION,
 } from "../lib/mutations";
 import { useAuth } from "../context/AuthContext";
 import { useMessageSubscription } from "../lib/useMessageSubscription";
 import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
 import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
+import { useMessageUnsentSubscription } from "../lib/useMessageUnsentSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
 
 interface MessageItem {
@@ -17,6 +19,7 @@ interface MessageItem {
   content: string;
   createdAt: string;
   read: boolean;
+  deleted: boolean;
   sender: { id: string; name: string; avatar: string | null };
   receiver: { id: string; name: string; avatar: string | null };
 }
@@ -124,6 +127,20 @@ export default function ChatWindow() {
     setPartnerAvatar(userUpdated.avatar);
   });
 
+  // Real-time unsend — Instagram-style: whichever side didn't trigger the
+  // unsend (or another tab of the sender) swaps the bubble to the
+  // "unsent" placeholder the moment it happens.
+  useMessageUnsentSubscription(({ messageUnsent }) => {
+    const isThisConversation =
+      (messageUnsent.sender.id === userId && messageUnsent.receiver.id === user?.id) ||
+      (messageUnsent.receiver.id === userId && messageUnsent.sender.id === user?.id);
+    if (!isThisConversation) return;
+
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageUnsent.id ? { ...m, deleted: true, content: "" } : m))
+    );
+  });
+
   async function handleSend() {
     if (!draft.trim() || !userId) return;
     const content = draft.trim();
@@ -140,6 +157,24 @@ export default function ChatWindow() {
     // carries it.
     setPartnerName((prev) => prev || data.sendMessage.receiver.name);
     setPartnerAvatar((prev) => prev ?? data.sendMessage.receiver.avatar);
+  }
+
+  // Unsend one of your own messages. Optimistic: flips the bubble to the
+  // placeholder immediately, then confirms with the server. If the
+  // server call fails, we roll the bubble back and surface the error
+  // instead of silently pretending it worked.
+  async function handleUnsend(messageId: string) {
+    const previous = messages;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, deleted: true, content: "" } : m))
+    );
+    try {
+      await gql(UNSEND_MESSAGE_MUTATION, { messageId });
+    } catch (err) {
+      console.error("Unsend failed:", err);
+      // Roll back the optimistic change since it didn't actually persist.
+      setMessages(previous);
+    }
   }
 
   if (loading) {
@@ -214,7 +249,7 @@ export default function ChatWindow() {
                 </div>
               )}
               <div className={`flex ${mine ? "justify-end" : "justify-start"} ${startsGroup ? "mt-3" : "mt-0.5"}`}>
-                <div className={`relative max-w-[75%] sm:max-w-[65%]`}>
+                <div className="group relative max-w-[75%] sm:max-w-[65%]">
                   <div
                     className={`px-4 py-2 font-body text-sm leading-relaxed shadow-sm ${
                       mine
@@ -222,14 +257,20 @@ export default function ChatWindow() {
                         : "rounded-2xl rounded-bl-sm bg-white text-whispr-noir"
                     }`}
                   >
-                    <span className="break-words">{m.content}</span>
+                    {m.deleted ? (
+                      <span className={`italic ${mine ? "text-white/70" : "text-whispr-mauve"}`}>
+                        This message was unsent
+                      </span>
+                    ) : (
+                      <span className="break-words">{m.content}</span>
+                    )}
                     <span
                       className={`ml-2 mt-1 inline-flex translate-y-[3px] items-center gap-1 align-bottom font-body text-[10px] ${
                         mine ? "text-white/75" : "text-whispr-mauve"
                       }`}
                     >
                       {formatTime(m.createdAt)}
-                      {mine && <MessageTicks read={m.read} variant="bubble" />}
+                      {mine && !m.deleted && <MessageTicks read={m.read} variant="bubble" />}
                     </span>
                   </div>
                   {/* bubble tail */}
@@ -241,6 +282,19 @@ export default function ChatWindow() {
                         : "polygon(100% 0, 100% 100%, 0 100%)",
                     }}
                   />
+                  {/* Unsend affordance — only for your own, not-yet-deleted messages */}
+                  {mine && !m.deleted && (
+                    <button
+                      onClick={() => handleUnsend(m.id)}
+                      aria-label="Unsend message"
+                      title="Unsend"
+                      className="absolute -top-2 -left-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-burgundy group-hover:flex"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

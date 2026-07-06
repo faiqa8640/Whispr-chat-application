@@ -5,12 +5,20 @@ import { CONVERSATIONS_QUERY } from "../../lib/mutations";
 import { useAuth } from "../../context/AuthContext";
 import { useMessageSubscription } from "../../lib/useMessageSubscription";
 import { useUserUpdatedSubscription } from "../../lib/useUserUpdatedSubscription";
+import { useMessageUnsentSubscription } from "../../lib/useMessageUnsentSubscription";
 import NewMessageModal from "./NewMessageModal";
 import MessageTicks from "./MessageTicks";
 
 interface ConversationItem {
   partner: { id: string; name: string; email: string; avatar: string | null };
-  lastMessage: { content: string; createdAt: string; read: boolean; sender: { id: string } } | null;
+  lastMessage: {
+    id: string;
+    content: string;
+    createdAt: string;
+    read: boolean;
+    deleted: boolean;
+    sender: { id: string };
+  } | null;
   unreadCount: number;
 }
 
@@ -56,8 +64,59 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
     loadConversations();
   }, []);
 
-  useMessageSubscription(() => {
-    loadConversations();
+  // WhatsApp-style: the moment a conversation becomes the active one
+  // (the user navigated into it), its unread badge clears immediately —
+  // don't wait for the mark-as-read network round trip to reflect it here.
+  useEffect(() => {
+    if (!activeId) return;
+    setConversations((prev) =>
+      prev.map((c) => (c.partner.id === activeId ? { ...c, unreadCount: 0 } : c))
+    );
+  }, [activeId]);
+
+  // Update the relevant conversation in place instead of refetching
+  // everything on every message. A full refetch here would race against
+  // ChatWindow's markConversationRead call and could momentarily show a
+  // stale unread count for the conversation you already have open.
+  useMessageSubscription((data) => {
+    const msg = data.messageReceived as {
+      id: string;
+      content: string;
+      createdAt: string;
+      read: boolean;
+      deleted: boolean;
+      sender: { id: string };
+      receiver: { id: string };
+    };
+    const partnerId = msg.sender.id === user?.id ? msg.receiver.id : msg.sender.id;
+    const wasSentByMe = msg.sender.id === user?.id;
+
+    setConversations((prev) => {
+      const idx = prev.findIndex((c) => c.partner.id === partnerId);
+
+      // Brand-new conversation partner we don't have a row for yet —
+      // only a full refetch can build that row (needs partner details).
+      if (idx === -1) {
+        loadConversations();
+        return prev;
+      }
+
+      const isActive = partnerId === activeId;
+      const updated = [...prev];
+      const existing = updated[idx];
+      updated[idx] = {
+        ...existing,
+        lastMessage: msg,
+        // Stays at 0 if it's the chat you're currently viewing, or if you
+        // were the one who sent it. Otherwise increments like normal.
+        unreadCount: isActive || wasSentByMe ? 0 : existing.unreadCount + 1,
+      };
+
+      // Bump the conversation to the top, WhatsApp-style.
+      const [item] = updated.splice(idx, 1);
+      updated.unshift(item);
+      return updated;
+    });
   });
 
   // Live profile updates — WhatsApp-style: if a person you're chatting with
@@ -68,6 +127,19 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
       prev.map((c) =>
         c.partner.id === userUpdated.id
           ? { ...c, partner: { ...c.partner, name: userUpdated.name, avatar: userUpdated.avatar } }
+          : c
+      )
+    );
+  });
+
+  // Real-time unsend — if the unsent message was the conversation's
+  // preview line, patch it in place so the sidebar flips to the
+  // "unsent" placeholder without needing a refetch.
+  useMessageUnsentSubscription(({ messageUnsent }) => {
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.lastMessage?.id === messageUnsent.id
+          ? { ...c, lastMessage: { ...c.lastMessage, deleted: true, content: "" } }
           : c
       )
     );
@@ -206,13 +278,19 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
                         )}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1">
-                        {mine && c.lastMessage && <MessageTicks read={c.lastMessage.read} />}
+                        {mine && c.lastMessage && !c.lastMessage.deleted && (
+                          <MessageTicks read={c.lastMessage.read} />
+                        )}
                         <p
                           className={`truncate font-body text-[13px] ${
                             c.unreadCount > 0 ? "text-whispr-noir/75 font-medium" : "text-whispr-mauve"
-                          }`}
+                          } ${c.lastMessage?.deleted ? "italic" : ""}`}
                         >
-                          {c.lastMessage?.content ?? "No messages yet"}
+                          {c.lastMessage
+                            ? c.lastMessage.deleted
+                              ? "This message was unsent"
+                              : c.lastMessage.content
+                            : "No messages yet"}
                         </p>
                       </div>
                     </div>

@@ -144,7 +144,7 @@ export const CONVERSATIONS_QUERY = /* GraphQL */ `
   query Conversations {
     conversations {
       partner { id name email avatar }
-      lastMessage { id content createdAt read sender { id } }
+      lastMessage { id content createdAt read deleted sender { id } }
       unreadCount
     }
   }
@@ -153,7 +153,7 @@ export const CONVERSATIONS_QUERY = /* GraphQL */ `
 export const MESSAGES_QUERY = /* GraphQL */ `
   query Messages($withUserId: ID!, $limit: Int) {
     messages(withUserId: $withUserId, limit: $limit) {
-      id content createdAt read
+      id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
     }
@@ -163,7 +163,7 @@ export const MESSAGES_QUERY = /* GraphQL */ `
 export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
   mutation SendMessage($receiverId: ID!, $content: String!) {
     sendMessage(receiverId: $receiverId, content: $content) {
-      id content createdAt read
+      id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
     }
@@ -176,10 +176,21 @@ export const MARK_CONVERSATION_READ_MUTATION = /* GraphQL */ `
   }
 `;
 
+// Unsend (soft-delete) a message you sent.
+export const UNSEND_MESSAGE_MUTATION = /* GraphQL */ `
+  mutation UnsendMessage($messageId: ID!) {
+    unsendMessage(messageId: $messageId) {
+      id content createdAt read deleted
+      sender { id name avatar }
+      receiver { id name avatar }
+    }
+  }
+`;
+
 export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageReceived {
     messageReceived {
-      id content createdAt read
+      id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
     }
@@ -213,6 +224,19 @@ export const USER_UPDATED_SUBSCRIPTION = /* GraphQL */ `
       isVerified
       createdAt
       updatedAt
+    }
+  }
+`;
+
+// Fires whenever a message is unsent — lets the other participant's
+// client swap the bubble for the "This message was unsent" placeholder
+// in real time, Instagram-style.
+export const MESSAGE_UNSENT_SUBSCRIPTION = /* GraphQL */ `
+  subscription MessageUnsent {
+    messageUnsent {
+      id content createdAt read deleted
+      sender { id name avatar }
+      receiver { id name avatar }
     }
   }
 `;

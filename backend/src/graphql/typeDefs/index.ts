@@ -35,6 +35,7 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     receiver: User!
     content: String!
     read: Boolean!
+    deleted: Boolean!
     createdAt: DateTime!
   }
 
@@ -126,6 +127,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     # ── Message ────────────────────────────────────────────────────────────────────
     sendMessage(receiverId: ID!, content: String!): Message!
     markConversationRead(withUserId: ID!): Boolean!
+
+    """
+    Unsend (soft-delete) a message you sent. Wipes the content server-side
+    and marks it deleted — like Instagram's "Unsend".
+    """
+    unsendMessage(messageId: ID!): Message!
   }
 
 
@@ -139,5 +146,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     chat) can update live without a refresh.
     """
     userUpdated: User!
+
+    """
+    Emitted whenever a message is unsent, so the other participant's
+    client can immediately swap the bubble for the "unsent" placeholder.
+    """
+    messageUnsent: Message!
   }
 `;
+

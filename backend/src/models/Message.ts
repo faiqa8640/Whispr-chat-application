@@ -5,6 +5,7 @@ export interface IMessage extends Document {
   receiver: mongoose.Types.ObjectId;
   content: string;
   read: boolean;
+  deleted: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -13,8 +14,19 @@ const MessageSchema = new Schema<IMessage>(
   {
     sender: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     receiver: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    content: { type: String, required: true, trim: true, maxlength: 5000 },
+    content: {
+      type: String,
+      // Only required while the message hasn't been unsent — once
+      // `deleted` is true we intentionally blank the content, and that
+      // blank value must be allowed to save.
+      required: function (this: IMessage) {
+        return !this.deleted;
+      },
+      trim: true,
+      maxlength: 5000,
+    },
     read: { type: Boolean, default: false },
+    deleted: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
