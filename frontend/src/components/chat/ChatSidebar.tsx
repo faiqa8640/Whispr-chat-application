@@ -9,6 +9,12 @@ import { useMessageUnsentSubscription } from "../../lib/useMessageUnsentSubscrip
 import { useReadReceiptSubscription } from "../../lib/useReadReceiptSubscription";
 import NewMessageModal from "./NewMessageModal";
 import MessageTicks from "./MessageTicks";
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  shouldNotify,
+  showMessageNotification,
+} from "../../lib/notifications";
 
 interface ConversationItem {
   partner: { id: string; name: string; email: string; avatar: string | null };
@@ -55,6 +61,20 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Push-notification permission (WhatsApp-style "new message" alerts).
+  // Initialized from the browser's current state so we don't show the
+  // "enable notifications" banner if the person already granted/denied it
+  // in a previous session.
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | null>(
+    () => getNotificationPermission()
+  );
+  const [notifBannerDismissed, setNotifBannerDismissed] = useState(false);
+
+  async function handleEnableNotifications() {
+    const result = await requestNotificationPermission();
+    setNotifPermission(result);
+  }
+
   async function loadConversations() {
     const data = await gql<{ conversations: ConversationItem[] }>(CONVERSATIONS_QUERY);
     setConversations(data.conversations);
@@ -86,11 +106,30 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
       createdAt: string;
       read: boolean;
       deleted: boolean;
-      sender: { id: string };
-      receiver: { id: string };
+      sender: { id: string; name: string; avatar: string | null };
+      receiver: { id: string; name: string; avatar: string | null };
     };
     const partnerId = msg.sender.id === user?.id ? msg.receiver.id : msg.sender.id;
     const wasSentByMe = msg.sender.id === user?.id;
+
+    // Push a WhatsApp-style OS notification for incoming messages the
+    // person isn't actively looking at right now. Sent-by-me messages
+    // never notify, and shouldNotify() handles the "already viewing this
+    // exact conversation" and tab-focus cases.
+    if (!wasSentByMe && shouldNotify(partnerId, activeId)) {
+      showMessageNotification({
+        partnerId,
+        senderName: msg.sender.name,
+        senderAvatar: msg.sender.avatar,
+        content: msg.content,
+        deleted: msg.deleted,
+        onClick: () => {
+          navigate(`/chat/${partnerId}`, {
+            state: { partnerName: msg.sender.name, partnerAvatar: msg.sender.avatar },
+          });
+        },
+      });
+    }
 
     setConversations((prev) => {
       const idx = prev.findIndex((c) => c.partner.id === partnerId);
@@ -207,6 +246,33 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
           </button>
         </div>
       </div>
+
+      {/* Enable-notifications prompt — only shown when the browser supports
+          it and the person hasn't already granted/denied/dismissed it */}
+      {notifPermission === "default" && !notifBannerDismissed && (
+        <div className="flex items-center justify-between gap-3 border-b border-whispr-linen bg-whispr-petal/30 px-4 py-2.5">
+          <p className="font-body text-xs text-whispr-noir">
+            Turn on notifications to know when new messages arrive.
+          </p>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              onClick={handleEnableNotifications}
+              className="rounded-full bg-whispr-coral px-3 py-1 font-body text-[11px] font-semibold uppercase tracking-wider text-white transition hover:bg-whispr-crimson"
+            >
+              Enable
+            </button>
+            <button
+              onClick={() => setNotifBannerDismissed(true)}
+              aria-label="Dismiss"
+              className="flex h-6 w-6 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-white/60 hover:text-whispr-noir"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="border-b border-whispr-linen px-4 py-3">

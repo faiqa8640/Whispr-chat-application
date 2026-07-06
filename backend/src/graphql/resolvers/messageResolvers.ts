@@ -96,15 +96,6 @@ export const messageResolvers = {
       ]);
 
       // The aggregation above returns raw Message documents for `lastMessage`
-      // (via $first: "$$ROOT"), so sender/receiver/replyTo are still plain
-      // ObjectIds -- aggregate() does NOT run Mongoose .populate(). Since
-      // formatMessage() expects those fields to already be populated user
-      // (and replyTo.sender) documents, we populate them here before
-      // formatting, otherwise formatUser(undefined) blows up with
-      // "Cannot read properties of undefined (reading '_id')".
-      // Guard against a null/undefined lastMessage (shouldn't normally
-      // happen since $group only runs over existing messages, but
-      // Message.populate() throws on null entries, so filter defensively).
       const messagesToPopulate = results.map((r) => r.lastMessage).filter(Boolean);
       if (messagesToPopulate.length > 0) {
         await Message.populate(messagesToPopulate, [
