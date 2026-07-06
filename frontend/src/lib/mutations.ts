@@ -156,16 +156,18 @@ export const MESSAGES_QUERY = /* GraphQL */ `
       id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
+      replyTo { id content deleted sender { id name avatar } }
     }
   }
 `;
 
 export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
-  mutation SendMessage($receiverId: ID!, $content: String!) {
-    sendMessage(receiverId: $receiverId, content: $content) {
+  mutation SendMessage($receiverId: ID!, $content: String!, $replyToId: ID) {
+    sendMessage(receiverId: $receiverId, content: $content, replyToId: $replyToId) {
       id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
+      replyTo { id content deleted sender { id name avatar } }
     }
   }
 `;
@@ -193,6 +195,7 @@ export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
       id content createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
+      replyTo { id content deleted sender { id name avatar } }
     }
   }
 `;

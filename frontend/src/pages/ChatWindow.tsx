@@ -22,6 +22,12 @@ interface MessageItem {
   deleted: boolean;
   sender: { id: string; name: string; avatar: string | null };
   receiver: { id: string; name: string; avatar: string | null };
+  replyTo: {
+    id: string;
+    content: string;
+    deleted: boolean;
+    sender: { id: string; name: string; avatar: string | null };
+  } | null;
 }
 
 // Every avatar uses the same dark-purple gradient as sent message bubbles
@@ -61,7 +67,14 @@ export default function ChatWindow() {
   const [loading, setLoading] = useState(true);
   const [partnerName, setPartnerName] = useState("");
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
+  // The message currently staged as a reply target — shown as a preview
+  // above the composer, WhatsApp-style, until sent or cancelled.
+  const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  // Briefly highlighted after jumping to a message via its quoted preview,
+  // so the person can actually spot which bubble they landed on.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   async function loadMessages() {
     if (!userId) return;
@@ -141,13 +154,26 @@ export default function ChatWindow() {
     );
   });
 
+  // Jumps to (and briefly highlights) the original message when its
+  // quoted preview is tapped inside a reply bubble — WhatsApp-style.
+  function scrollToMessage(id: string) {
+    const el = messageRefs.current[id];
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedId(id);
+    setTimeout(() => setHighlightedId((cur) => (cur === id ? null : cur)), 1200);
+  }
+
   async function handleSend() {
     if (!draft.trim() || !userId) return;
     const content = draft.trim();
+    const replyToId = replyingTo?.id;
     setDraft("");
+    setReplyingTo(null);
     const data = await gql<{ sendMessage: MessageItem }>(SEND_MESSAGE_MUTATION, {
       receiverId: userId,
       content,
+      replyToId,
     });
     setMessages((prev) =>
       prev.some((m) => m.id === data.sendMessage.id) ? prev : [...prev, data.sendMessage]
@@ -251,12 +277,39 @@ export default function ChatWindow() {
               <div className={`flex ${mine ? "justify-end" : "justify-start"} ${startsGroup ? "mt-3" : "mt-0.5"}`}>
                 <div className="group relative max-w-[75%] sm:max-w-[65%]">
                   <div
-                    className={`px-4 py-2 font-body text-sm leading-relaxed shadow-sm ${
+                    ref={(el) => { messageRefs.current[m.id] = el; }}
+                    className={`px-4 py-2 font-body text-sm leading-relaxed shadow-sm transition-shadow ${
                       mine
                         ? "rounded-2xl rounded-br-sm bg-gradient-to-br from-whispr-coral to-whispr-crimson text-white"
                         : "rounded-2xl rounded-bl-sm bg-white text-whispr-noir"
-                    }`}
+                    } ${highlightedId === m.id ? "ring-2 ring-offset-2 ring-whispr-coral" : ""}`}
                   >
+                    {m.replyTo && (
+                      <button
+                        type="button"
+                        onClick={() => scrollToMessage(m.replyTo!.id)}
+                        className={`mb-1.5 block w-full max-w-full rounded-lg border-l-[3px] px-2.5 py-1.5 text-left ${
+                          mine
+                            ? "border-white/70 bg-white/15 hover:bg-white/20"
+                            : "border-whispr-coral bg-whispr-snow hover:bg-whispr-linen"
+                        }`}
+                      >
+                        <p
+                          className={`font-body text-[11px] font-semibold ${
+                            mine ? "text-white" : "text-whispr-coral"
+                          }`}
+                        >
+                          {m.replyTo.sender.id === user?.id ? "You" : partnerName}
+                        </p>
+                        <p
+                          className={`truncate font-body text-[11px] ${
+                            m.replyTo.deleted ? "italic" : ""
+                          } ${mine ? "text-white/80" : "text-whispr-mauve"}`}
+                        >
+                          {m.replyTo.deleted ? "This message was unsent" : m.replyTo.content}
+                        </p>
+                      </button>
+                    )}
                     {m.deleted ? (
                       <span className={`italic ${mine ? "text-white/70" : "text-whispr-mauve"}`}>
                         This message was unsent
@@ -295,6 +348,35 @@ export default function ChatWindow() {
                       </svg>
                     </button>
                   )}
+                  {/* Reply affordance — available on any not-yet-deleted
+                      message, mine or theirs, opposite side from unsend. */}
+                  {!m.deleted && (
+                    <button
+                      onClick={() => setReplyingTo(m)}
+                      aria-label="Reply"
+                      title="Reply"
+                      className={`absolute -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-coral group-hover:flex ${
+                        mine ? "-right-2" : "-left-2"
+                      }`}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M9 10L4 15L9 20"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M4 15H15A5 5 0 0020 10V9"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -305,6 +387,32 @@ export default function ChatWindow() {
 
       {/* Composer */}
       <div className="border-t border-whispr-linen bg-white px-4 py-3.5 sm:px-6">
+        {replyingTo && (
+          <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2">
+            <div className="min-w-0">
+              <p className="font-body text-xs font-semibold text-whispr-coral">
+                Replying to {replyingTo.sender.id === user?.id ? "yourself" : partnerName}
+              </p>
+              <p
+                className={`truncate font-body text-xs text-whispr-mauve ${
+                  replyingTo.deleted ? "italic" : ""
+                }`}
+              >
+                {replyingTo.deleted ? "This message was unsent" : replyingTo.content}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyingTo(null)}
+              aria-label="Cancel reply"
+              className="mt-0.5 shrink-0 text-whispr-mauve transition hover:text-whispr-noir"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <input
             value={draft}

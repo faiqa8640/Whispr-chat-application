@@ -20,6 +20,18 @@ function formatMessage(msg: any) {
     read: msg.read,
     deleted: !!msg.deleted,
     createdAt: msg.createdAt,
+    // replyTo is only populated when the message quotes an earlier one.
+    // If the quoted message was itself unsent, blank its content here too
+    // so the preview shows "This message was unsent" instead of leaking
+    // the original text.
+    replyTo: msg.replyTo
+      ? {
+          id: msg.replyTo._id.toString(),
+          sender: formatUser(msg.replyTo.sender),
+          content: msg.replyTo.deleted ? "" : msg.replyTo.content,
+          deleted: !!msg.replyTo.deleted,
+        }
+      : null,
   };
 }
 
@@ -83,6 +95,25 @@ export const messageResolvers = {
         { $sort: { "lastMessage.createdAt": -1 } },
       ]);
 
+      // The aggregation above returns raw Message documents for `lastMessage`
+      // (via $first: "$$ROOT"), so sender/receiver/replyTo are still plain
+      // ObjectIds -- aggregate() does NOT run Mongoose .populate(). Since
+      // formatMessage() expects those fields to already be populated user
+      // (and replyTo.sender) documents, we populate them here before
+      // formatting, otherwise formatUser(undefined) blows up with
+      // "Cannot read properties of undefined (reading '_id')".
+      // Guard against a null/undefined lastMessage (shouldn't normally
+      // happen since $group only runs over existing messages, but
+      // Message.populate() throws on null entries, so filter defensively).
+      const messagesToPopulate = results.map((r) => r.lastMessage).filter(Boolean);
+      if (messagesToPopulate.length > 0) {
+        await Message.populate(messagesToPopulate, [
+          { path: "sender" },
+          { path: "receiver" },
+          { path: "replyTo", populate: { path: "sender" } },
+        ]);
+      }
+
       // This fetches all chat partners in one query.-> hence partners contain all the partner jinsy chat hoi hoi
       // r._id -> is the chat partener id 
       const partners = await User.find({ _id: { $in: results.map((r) => r._id) } });
@@ -125,7 +156,8 @@ export const messageResolvers = {
         .sort({ createdAt: -1 }) // in descenting order
         .limit(limit)// apply limit
         .populate("sender")//  the db only contain the ids so we populate the document  with the sender info
-        .populate("receiver");
+        .populate("receiver")
+        .populate({ path: "replyTo", populate: { path: "sender" } });
 
       return docs.reverse().map(formatMessage);// reverse it so that 50 msg come first tehn 49 etc
       // hence the newest msg will come at the bottom and the oldest msg will come at the top
@@ -142,7 +174,7 @@ export const messageResolvers = {
     // This creates and sends a new message.
     sendMessage: async (
       _: unknown,
-      { receiverId, content }: { receiverId: string; content: string },//frontned argument
+      { receiverId, content, replyToId }: { receiverId: string; content: string; replyToId?: string },//frontned argument
       ctx: AuthContext
     ) => {
       const me = requireAuth(ctx);//Only logged-in users can send messages.
@@ -156,15 +188,38 @@ export const messageResolvers = {
       const receiver = await User.findById(receiverId);//find the reciever 
       if (!receiver) throw new Error("Recipient not found.");// if not present in the db then throw erro
 
+      // If replying, make sure the quoted message actually belongs to this
+      // same conversation -- otherwise silently drop the quote rather than
+      // let a client attach an arbitrary/unrelated message as a reply.
+      let replyTo: string | undefined;
+      if (replyToId) {
+        const original = await Message.findById(replyToId);
+        if (
+          original &&
+          ((original.sender.toString() === me._id.toString() &&
+            original.receiver.toString() === receiverId) ||
+            (original.receiver.toString() === me._id.toString() &&
+              original.sender.toString() === receiverId))
+        ) {
+          replyTo = replyToId;
+        }
+      }
+
       const message = await Message.create({//creating the msg
         sender: me._id,
         receiver: receiverId,
         content: content.trim(),
+        replyTo,
       });
 
 
-      //populate the sender and reciever and get their info and after populating treat them as a user object not mongodb object
-      const populated = await message.populate<{ sender: any; receiver: any }>(["sender", "receiver"]);
+      //populate the sender and reciever and get their info, plus the quoted
+      // message (and its sender) if this is a reply
+      const populated = await message.populate<{ sender: any; receiver: any; replyTo: any }>([
+        "sender",
+        "receiver",
+        { path: "replyTo", populate: "sender" },
+      ]);
       const formatted = formatMessage(populated);//format the msg
 
       pubsub.publish(EVENTS.MESSAGE_RECEIVED, { messageReceived: formatted });

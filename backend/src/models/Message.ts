@@ -6,6 +6,7 @@ export interface IMessage extends Document {
   content: string;
   read: boolean;
   deleted: boolean;
+  replyTo?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +28,10 @@ const MessageSchema = new Schema<IMessage>(
     },
     read: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
+    // Optional reference to the message this one is replying to. Left
+    // unset for normal messages — only populated when the client quotes
+    // an earlier message, WhatsApp-style.
+    replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },
   },
   { timestamps: true }
 );

@@ -1,3 +1,4 @@
+
 export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schema Language (SDL).*/ `
   # ─── Scalars / Enums ─────────────────────────────────────────────────────────
   scalar DateTime
@@ -29,6 +30,19 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     message: String!
   }
 
+  """
+  A lightweight snapshot of the message being replied to — shown as the
+  quoted preview above a reply, WhatsApp-style. Deliberately smaller than
+  the full Message type (no receiver/read/createdAt) since the preview
+  only needs who said it and what it said.
+  """
+  type ReplyPreview {
+    id: ID!
+    sender: User!
+    content: String!
+    deleted: Boolean!
+  }
+
   type Message {
     id: ID!
     sender: User!
@@ -37,6 +51,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     read: Boolean!
     deleted: Boolean!
     createdAt: DateTime!
+    """The message this one is replying to, if any."""
+    replyTo: ReplyPreview
   }
 
   type Conversation {
@@ -125,7 +141,11 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
 
 
     # ── Message ────────────────────────────────────────────────────────────────────
-    sendMessage(receiverId: ID!, content: String!): Message!
+    """
+    Send a message. Pass replyToId to quote an earlier message in this
+    same conversation — WhatsApp-style reply.
+    """
+    sendMessage(receiverId: ID!, content: String!, replyToId: ID): Message!
     markConversationRead(withUserId: ID!): Boolean!
 
     """
@@ -154,4 +174,3 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     messageUnsent: Message!
   }
 `;
-
