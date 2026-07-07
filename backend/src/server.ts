@@ -1,3 +1,4 @@
+
 import http from "http";
 import { WebSocketServer } from "ws";
 import { useServer } from "graphql-ws/use/ws";
@@ -6,6 +7,7 @@ import { connectDB } from "./config/db.js";
 import { ENV } from "./config/env.js";
 import { verifyToken } from "./utils/token.js";
 import User from "./models/User.js";
+import { markUserOnline, markUserOffline } from "./utils/onlineStatus.js";
 
 // ─── Small helper: extract one cookie value from a raw Cookie header ─────────
 function getCookie(cookieHeader: string | undefined, name: string): string | undefined {
@@ -30,8 +32,16 @@ async function main() {
   useServer(
     {
       schema,
+      // Per-operation context — reuses the user resolved once in onConnect
+      // (stashed on ctx.extra) instead of re-verifying the token every time.
       context: async (ctx: any) => {
-        const token = getCookie(ctx.extra.request.headers.cookie, "delina_token");
+        return { user: ctx.extra?.user ?? null };
+      },
+      // Runs once when a client's WebSocket connection is established.
+      // Resolves the user from their cookie, stashes it on the connection,
+      // and marks them online (bumping their connection count).
+      onConnect: async (ctx: any) => {
+        const token = getCookie(ctx.extra?.request?.headers?.cookie, "delina_token");
         let user = null;
         if (token) {
           try {
@@ -41,7 +51,19 @@ async function main() {
             // invalid/expired — stay unauthenticated
           }
         }
-        return { user };
+        ctx.extra.user = user;
+        if (user) {
+          await markUserOnline(user._id.toString());
+        }
+      },
+      // Runs once when the socket closes (tab closed, refresh, network
+      // drop, etc). Flips the person to offline — with a recorded
+      // lastSeen — only once their *last* open tab/device disconnects.
+      onDisconnect: async (ctx: any) => {
+        const user = ctx.extra?.user;
+        if (user) {
+          await markUserOffline(user._id.toString());
+        }
       },
     },
     wsServer

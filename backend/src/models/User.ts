@@ -20,6 +20,12 @@ export interface IUser extends Document {
   resetToken?: string;
   resetTokenExpires?: Date;
 
+  // Last time this user's final WebSocket connection dropped. Undefined
+  // means they've never disconnected since this field was introduced (or
+  // are a brand-new account) — the frontend treats that the same as "no
+  // last-seen info available" rather than a specific date.
+  lastSeen?: Date;
+
   createdAt: Date;
   updatedAt: Date;
 
@@ -45,6 +51,8 @@ const UserSchema = new Schema<IUser>(
 
     resetToken:        { type: String, select: false },
     resetTokenExpires: { type: Date,   select: false },
+
+    lastSeen: { type: Date },
   },
   { timestamps: true }
 );

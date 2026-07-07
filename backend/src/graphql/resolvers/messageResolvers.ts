@@ -5,6 +5,7 @@ import { AuthContext, requireAuth } from "../../middleware/authContext.js";
 import { formatUser } from "./authResolvers.js";
 import type { IUser } from "../../models/User.js";
 import { pubsub, EVENTS } from "../pubsub.js";
+import { isUserOnline } from "../../utils/onlineStatus.js";
 
 export { pubsub };
 
@@ -158,6 +159,23 @@ export const messageResolvers = {
       return docs.reverse().map(formatMessage);// reverse it so that 50 msg come first tehn 49 etc
       // hence the newest msg will come at the bottom and the oldest msg will come at the top
       // .reverse() changes them into chronological order.
+    },
+
+    // _USER STATUS____________________________________________________
+    // One-time presence fetch used when a conversation is first opened
+    // (ChatWindow.loadPartnerStatus). Live updates after that arrive via
+    // the userStatusChanged subscription below — this query only needs
+    // to answer "what's true right now".
+    userStatus: async (_: unknown, { userId }: { userId: string }, ctx: AuthContext) => {
+      requireAuth(ctx);
+      const user = await User.findById(userId).select("lastSeen");
+      return {
+        userId,
+        // Online/offline is tracked in-memory (connection counts), not on
+        // the document, same as formatUser() does for the User type.
+        isOnline: isUserOnline(userId),
+        lastSeen: user?.lastSeen ?? null,
+      };
     },
   },
 
@@ -448,6 +466,39 @@ export const messageResolvers = {
           if (!userId) return false;
 
           return payload.typingStatus.receiverId === userId;
+        }
+      ),
+    },
+
+    // _USER STATUS CHANGED____________________________________________________
+    // Fires whenever any user's connection count goes 0 -> 1 (came online)
+    // or 1 -> 0 (went offline). This was previously MISSING here even
+    // though it's declared on the Subscription type in typeDefs — without
+    // a subscribe resolver, graphql-js has nothing to turn into an async
+    // iterable for this field, so graphql-ws fatally closed the entire
+    // shared WebSocket connection the instant useUserStatusSubscription
+    // fired, which is why every other subscription died at the same time.
+    // Broadcast to everyone except the user whose own status just changed,
+    // same pattern as userUpdated.
+    userStatusChanged: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterableIterator([EVENTS.USER_STATUS_CHANGED]),
+        (
+          payload:
+            | {
+                userStatusChanged: {
+                  userId: string;
+                  isOnline: boolean;
+                  lastSeen: string | null;
+                };
+              }
+            | undefined,
+          _args: unknown,
+          context: { user: IUser | null } | undefined
+        ) => {
+          if (!payload) return false;
+          if (!context?.user) return false;
+          return payload.userStatusChanged.userId !== context.user._id.toString();
         }
       ),
     },

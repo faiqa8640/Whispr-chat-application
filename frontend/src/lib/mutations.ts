@@ -20,6 +20,8 @@ export const VERIFY_OTP_MUTATION = /* GraphQL */ `
         provider
         avatar
         isVerified
+        isOnline
+        lastSeen
         createdAt
         updatedAt
       }
@@ -47,6 +49,8 @@ export const LOGIN_MUTATION = /* GraphQL */ `
         provider
         avatar
         isVerified
+        isOnline
+        lastSeen
         createdAt
         updatedAt
       }
@@ -74,6 +78,8 @@ export const GOOGLE_AUTH_MUTATION = /* GraphQL */ `
         provider
         avatar
         isVerified
+        isOnline
+        lastSeen
         createdAt
         updatedAt
       }
@@ -109,6 +115,8 @@ export const UPDATE_PROFILE_MUTATION = /* GraphQL */ `
       provider
       avatar
       isVerified
+      isOnline
+      lastSeen
       createdAt
       updatedAt
     }
@@ -126,6 +134,8 @@ export const ME_QUERY = /* GraphQL */ `
       provider
       avatar
       isVerified
+      isOnline
+      lastSeen
       createdAt
       updatedAt
     }
@@ -143,7 +153,7 @@ export const FIND_USER_BY_EMAIL_QUERY = /* GraphQL */ `
 export const CONVERSATIONS_QUERY = /* GraphQL */ `
   query Conversations {
     conversations {
-      partner { id name email avatar }
+      partner { id name email avatar isOnline lastSeen }
       lastMessage { id content createdAt read deleted sender { id } }
       unreadCount
     }
@@ -154,8 +164,8 @@ export const MESSAGES_QUERY = /* GraphQL */ `
   query Messages($withUserId: ID!, $limit: Int) {
     messages(withUserId: $withUserId, limit: $limit) {
       id content createdAt read deleted
-      sender { id name avatar }
-      receiver { id name avatar }
+      sender { id name avatar isOnline lastSeen }
+      receiver { id name avatar isOnline lastSeen }
       replyTo { id content deleted sender { id name avatar } }
     }
   }
@@ -165,8 +175,8 @@ export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
   mutation SendMessage($receiverId: ID!, $content: String!, $replyToId: ID) {
     sendMessage(receiverId: $receiverId, content: $content, replyToId: $replyToId) {
       id content createdAt read deleted
-      sender { id name avatar }
-      receiver { id name avatar }
+      sender { id name avatar isOnline lastSeen }
+      receiver { id name avatar isOnline lastSeen }
       replyTo { id content deleted sender { id name avatar } }
     }
   }
@@ -199,8 +209,8 @@ export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageReceived {
     messageReceived {
       id content createdAt read deleted
-      sender { id name avatar }
-      receiver { id name avatar }
+      sender { id name avatar isOnline lastSeen }
+      receiver { id name avatar isOnline lastSeen }
       replyTo { id content deleted sender { id name avatar } }
     }
   }
@@ -231,6 +241,8 @@ export const USER_UPDATED_SUBSCRIPTION = /* GraphQL */ `
       provider
       avatar
       isVerified
+      isOnline
+      lastSeen
       createdAt
       updatedAt
     }
@@ -259,6 +271,33 @@ export const TYPING_STATUS_SUBSCRIPTION = /* GraphQL */ `
       userId
       receiverId
       isTyping
+    }
+  }
+`;
+
+// ─── Presence (online/offline + last seen) ────────────────────────────────────
+
+// One-time fetch used when a conversation is opened — after this, live
+// updates arrive via USER_STATUS_CHANGED_SUBSCRIPTION.
+export const USER_STATUS_QUERY = /* GraphQL */ `
+  query UserStatus($userId: ID!) {
+    userStatus(userId: $userId) {
+      userId
+      isOnline
+      lastSeen
+    }
+  }
+`;
+
+// Fires whenever any user goes online or offline. Broadcast to every
+// authenticated client — consumers filter by userId themselves, same
+// pattern as USER_UPDATED_SUBSCRIPTION.
+export const USER_STATUS_CHANGED_SUBSCRIPTION = /* GraphQL */ `
+  subscription UserStatusChanged {
+    userStatusChanged {
+      userId
+      isOnline
+      lastSeen
     }
   }
 `;

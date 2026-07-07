@@ -1,4 +1,3 @@
-
 export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schema Language (SDL).*/ `
   # ─── Scalars / Enums ─────────────────────────────────────────────────────────
   scalar DateTime
@@ -16,6 +15,10 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     provider: AuthProvider!
     avatar: String
     isVerified: Boolean!
+    """Whether this user currently has at least one live connection (a tab/device open)."""
+    isOnline: Boolean!
+    """When this user's last connection dropped. Null while they're online, or if never recorded."""
+    lastSeen: DateTime
     createdAt: DateTime!
     updatedAt: DateTime!
   }
@@ -79,6 +82,16 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     isTyping: Boolean!
   }
 
+  """
+  Online/offline presence for a single user, used both for the initial
+  fetch (userStatus query) and live updates (userStatusChanged subscription).
+  """
+  type UserStatus {
+    userId: ID!
+    isOnline: Boolean!
+    lastSeen: DateTime
+  }
+
   # ─── Query ───────────────────────────────────────────────────────────────────
   type Query {
     """Returns the currently authenticated user."""
@@ -88,6 +101,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     conversations: [Conversation!]!
     messages(withUserId: ID!, limit: Int): [Message!]!
 
+    """Current online/offline status + last seen for a single user."""
+    userStatus(userId: ID!): UserStatus!
   }
 
   # ─── Mutations ───────────────────────────────────────────────────────────────
@@ -190,6 +205,11 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     show the animated "..." indicator in real time.
     """
     typingStatus: TypingStatus!
+
+    """
+    Emitted whenever any user goes online or offline, so open chats and
+    the sidebar can update presence dots / "last seen" text live.
+    """
+    userStatusChanged: UserStatus!
   }
 `;
-

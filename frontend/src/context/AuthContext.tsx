@@ -18,6 +18,8 @@ export interface AuthUser {
   provider: "local" | "google";
   avatar: string | null;
   isVerified: boolean;
+  isOnline?: boolean;
+  lastSeen?: string | null;
   createdAt: string;
   updatedAt: string;
 }

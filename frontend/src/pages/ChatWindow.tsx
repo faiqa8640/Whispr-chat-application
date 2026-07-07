@@ -7,6 +7,7 @@ import {
   MARK_CONVERSATION_READ_MUTATION,
   UNSEND_MESSAGE_MUTATION,
   SET_TYPING_MUTATION,
+  USER_STATUS_QUERY,
 } from "../lib/mutations";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -15,6 +16,7 @@ import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
 import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
 import { useMessageUnsentSubscription } from "../lib/useMessageUnsentSubscription";
 import { useTypingSubscription } from "../lib/useTypingSubscription";
+import { useUserStatusSubscription } from "../lib/useUserStatusSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
 
 interface MessageItem {
@@ -64,6 +66,19 @@ function formatDayLabel(iso: string) {
   return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
 }
 
+// WhatsApp-style "last seen" phrasing: relative for today/yesterday,
+// an absolute date otherwise.
+function formatLastSeen(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return `last seen today at ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `last seen yesterday at ${time}`;
+  return `last seen ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 export default function ChatWindow() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
@@ -75,6 +90,10 @@ export default function ChatWindow() {
   const [loading, setLoading] = useState(true);
   const [partnerName, setPartnerName] = useState("");
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
+  // Presence — whether the partner currently has a live connection, and
+  // (only when offline) when their last connection dropped.
+  const [partnerOnline, setPartnerOnline] = useState(false);
+  const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
   // The message currently staged as a reply target — shown as a preview
   // above the composer, WhatsApp-style, until sent or cancelled.
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
@@ -151,6 +170,19 @@ export default function ChatWindow() {
     await gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId });
   }
 
+  async function loadPartnerStatus() {
+    if (!userId) return;
+    try {
+      const data = await gql<{
+        userStatus: { userId: string; isOnline: boolean; lastSeen: string | null };
+      }>(USER_STATUS_QUERY, { userId });
+      setPartnerOnline(data.userStatus.isOnline);
+      setPartnerLastSeen(data.userStatus.lastSeen);
+    } catch {
+      // Non-critical — presence just won't show for this session.
+    }
+  }
+
   useEffect(() => {
     setLoading(true);
     // If we arrived here via the sidebar / new-message modal, the partner's
@@ -160,9 +192,12 @@ export default function ChatWindow() {
     const state = location.state as { partnerName?: string; partnerAvatar?: string | null } | null;
     setPartnerName(state?.partnerName ?? "");
     setPartnerAvatar(state?.partnerAvatar ?? null);
-    // Switching conversations — any stale typing state doesn't apply here.
+    // Switching conversations — any stale typing/presence state doesn't apply here.
     setPartnerTyping(false);
+    setPartnerOnline(false);
+    setPartnerLastSeen(null);
     loadMessages();
+    loadPartnerStatus();
 
     // Leaving/changing a conversation while mid-keystroke shouldn't leave
     // the other person thinking we're still typing forever.
@@ -214,6 +249,14 @@ export default function ChatWindow() {
     if (userUpdated.id !== userId) return;
     setPartnerName(userUpdated.name);
     setPartnerAvatar(userUpdated.avatar);
+  });
+
+  // Live presence — flips "online" / "last seen" in the header the moment
+  // the partner connects or disconnects, no refetch needed.
+  useUserStatusSubscription(({ userStatusChanged }) => {
+    if (userStatusChanged.userId !== userId) return;
+    setPartnerOnline(userStatusChanged.isOnline);
+    setPartnerLastSeen(userStatusChanged.lastSeen);
   });
 
   // Real-time unsend — Instagram-style: whichever side didn't trigger the
@@ -310,28 +353,43 @@ export default function ChatWindow() {
             <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        {partnerAvatar ? (
-          <img
-            src={partnerAvatar}
-            alt={partnerName || "?"}
-            className="h-10 w-10 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-semibold text-white"
-            style={{ background: auraFor(partnerName || "?") }}
-          >
-            {partnerName ? initialsFor(partnerName) : "?"}
-          </div>
-        )}
+        <div className="relative shrink-0">
+          {partnerAvatar ? (
+            <img
+              src={partnerAvatar}
+              alt={partnerName || "?"}
+              className="h-10 w-10 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-semibold text-white"
+              style={{ background: auraFor(partnerName || "?") }}
+            >
+              {partnerName ? initialsFor(partnerName) : "?"}
+            </div>
+          )}
+          {/* Online presence dot on the chat header avatar too */}
+          {partnerOnline && (
+            <span
+              className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-green-500 dark:border-whispr-charcoal"
+              aria-label="Online"
+            />
+          )}
+        </div>
         <div className="flex flex-col">
           <h1 className="font-display text-lg font-semibold leading-tight text-whispr-noir dark:text-whispr-ivory">
             {partnerName}
           </h1>
-          {/* WhatsApp-style: swap the subtitle line to "typing..." while active */}
-          {partnerTyping && (
+          {/* Priority: typing indicator > online > last seen */}
+          {partnerTyping ? (
             <span className="font-body text-xs font-medium text-whispr-coral">typing…</span>
-          )}
+          ) : partnerOnline ? (
+            <span className="font-body text-xs font-medium text-green-600 dark:text-green-400">Online</span>
+          ) : partnerLastSeen ? (
+            <span className="font-body text-xs text-whispr-mauve dark:text-whispr-fog">
+              {formatLastSeen(partnerLastSeen)}
+            </span>
+          ) : null}
         </div>
       </div>
 
