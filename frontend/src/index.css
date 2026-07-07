@@ -2,10 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  transition: background-color 0.2s ease;
+}
+
+body {
+  @apply bg-whispr-snow text-whispr-noir dark:bg-whispr-night dark:text-whispr-ivory;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Lets native form controls (scrollbars, checkboxes, etc.) pick a dark
+   rendering instead of the browser defaulting them to light. */
+.dark {
+  color-scheme: dark;
+}
+
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus {
   -webkit-text-fill-color: #2A1F3D; /* whispr-noir */
   transition: background-color 5000s ease-in-out 0s;
   box-shadow: 0 0 0px 1000px #ffffff inset;
+}
+
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #F4EEFC; /* whispr-ivory */
+  box-shadow: 0 0 0px 1000px #1D1730 inset; /* whispr-charcoal */
 }

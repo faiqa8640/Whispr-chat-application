@@ -9,6 +9,7 @@ import {
   SET_TYPING_MUTATION,
 } from "../lib/mutations";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { useMessageSubscription } from "../lib/useMessageSubscription";
 import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
 import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
@@ -68,6 +69,7 @@ export default function ChatWindow() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -282,7 +284,7 @@ export default function ChatWindow() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-whispr-snow font-body text-sm text-whispr-mauve">
+      <div className="flex flex-1 items-center justify-center bg-whispr-snow font-body text-sm text-whispr-mauve dark:bg-whispr-night dark:text-whispr-fog">
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-coral [animation-delay:-0.3s]" />
           <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-coral [animation-delay:-0.15s]" />
@@ -296,12 +298,12 @@ export default function ChatWindow() {
   let lastDay = "";
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-whispr-snow">
+    <div className="flex h-full flex-1 flex-col bg-whispr-snow dark:bg-whispr-night">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-whispr-linen bg-white px-5 py-3">
+      <div className="flex items-center gap-3 border-b border-whispr-linen bg-white px-5 py-3 dark:border-whispr-ash dark:bg-whispr-charcoal">
         <button
           onClick={() => navigate("/inbox")}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-linen hover:text-whispr-noir md:hidden"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-linen hover:text-whispr-noir md:hidden dark:text-whispr-fog dark:hover:bg-whispr-onyx dark:hover:text-whispr-ivory"
           aria-label="Back to chats"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -323,7 +325,7 @@ export default function ChatWindow() {
           </div>
         )}
         <div className="flex flex-col">
-          <h1 className="font-display text-lg font-semibold leading-tight text-whispr-noir">
+          <h1 className="font-display text-lg font-semibold leading-tight text-whispr-noir dark:text-whispr-ivory">
             {partnerName}
           </h1>
           {/* WhatsApp-style: swap the subtitle line to "typing..." while active */}
@@ -339,7 +341,7 @@ export default function ChatWindow() {
         style={{
           backgroundImage: "radial-gradient(currentColor 1px, transparent 1px)",
           backgroundSize: "22px 22px",
-          color: "#EFE1F7",
+          color: theme === "dark" ? "#241D3B" : "#EFE1F7",
         }}
       >
         {messages.map((m, i) => {
@@ -354,7 +356,7 @@ export default function ChatWindow() {
             <div key={m.id}>
               {showDayDivider && (
                 <div className="my-4 flex justify-center">
-                  <span className="rounded-full bg-white px-3 py-1 font-body text-[11px] font-medium text-whispr-mauve shadow-sm">
+                  <span className="rounded-full bg-white px-3 py-1 font-body text-[11px] font-medium text-whispr-mauve shadow-sm dark:bg-whispr-charcoal dark:text-whispr-fog">
                     {day}
                   </span>
                 </div>
@@ -366,7 +368,7 @@ export default function ChatWindow() {
                     className={`px-4 py-2 font-body text-sm leading-relaxed shadow-sm transition-shadow ${
                       mine
                         ? "rounded-2xl rounded-br-sm bg-gradient-to-br from-whispr-coral to-whispr-crimson text-white"
-                        : "rounded-2xl rounded-bl-sm bg-white text-whispr-noir"
+                        : "rounded-2xl rounded-bl-sm bg-white text-whispr-noir dark:bg-whispr-charcoal dark:text-whispr-ivory"
                     } ${highlightedId === m.id ? "ring-2 ring-offset-2 ring-whispr-coral" : ""}`}
                   >
                     {m.replyTo && (
@@ -376,7 +378,7 @@ export default function ChatWindow() {
                         className={`mb-1.5 block w-full max-w-full rounded-lg border-l-[3px] px-2.5 py-1.5 text-left ${
                           mine
                             ? "border-white/70 bg-white/15 hover:bg-white/20"
-                            : "border-whispr-coral bg-whispr-snow hover:bg-whispr-linen"
+                            : "border-whispr-coral bg-whispr-snow hover:bg-whispr-linen dark:bg-whispr-onyx dark:hover:bg-whispr-ash"
                         }`}
                       >
                         <p
@@ -389,14 +391,14 @@ export default function ChatWindow() {
                         <p
                           className={`truncate font-body text-[11px] ${
                             m.replyTo.deleted ? "italic" : ""
-                          } ${mine ? "text-white/80" : "text-whispr-mauve"}`}
+                          } ${mine ? "text-white/80" : "text-whispr-mauve dark:text-whispr-fog"}`}
                         >
                           {m.replyTo.deleted ? "This message was unsent" : m.replyTo.content}
                         </p>
                       </button>
                     )}
                     {m.deleted ? (
-                      <span className={`italic ${mine ? "text-white/70" : "text-whispr-mauve"}`}>
+                      <span className={`italic ${mine ? "text-white/70" : "text-whispr-mauve dark:text-whispr-fog"}`}>
                         This message was unsent
                       </span>
                     ) : (
@@ -404,7 +406,7 @@ export default function ChatWindow() {
                     )}
                     <span
                       className={`ml-2 mt-1 inline-flex translate-y-[3px] items-center gap-1 align-bottom font-body text-[10px] ${
-                        mine ? "text-white/75" : "text-whispr-mauve"
+                        mine ? "text-white/75" : "text-whispr-mauve dark:text-whispr-fog"
                       }`}
                     >
                       {formatTime(m.createdAt)}
@@ -413,7 +415,9 @@ export default function ChatWindow() {
                   </div>
                   {/* bubble tail */}
                   <span
-                    className={`absolute bottom-0 h-3 w-3 ${mine ? "-right-1 bg-whispr-crimson" : "-left-1 bg-white"}`}
+                    className={`absolute bottom-0 h-3 w-3 ${
+                      mine ? "-right-1 bg-whispr-crimson" : "-left-1 bg-white dark:bg-whispr-charcoal"
+                    }`}
                     style={{
                       clipPath: mine
                         ? "polygon(0 0, 100% 100%, 0 100%)"
@@ -426,7 +430,7 @@ export default function ChatWindow() {
                       onClick={() => handleUnsend(m.id)}
                       aria-label="Unsend message"
                       title="Unsend"
-                      className="absolute -top-2 -left-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-burgundy group-hover:flex"
+                      className="absolute -top-2 -left-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-burgundy group-hover:flex dark:bg-whispr-charcoal dark:text-whispr-fog dark:hover:text-whispr-petal"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
                         <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -440,7 +444,7 @@ export default function ChatWindow() {
                       onClick={() => setReplyingTo(m)}
                       aria-label="Reply"
                       title="Reply"
-                      className={`absolute -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-coral group-hover:flex ${
+                      className={`absolute -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-coral group-hover:flex dark:bg-whispr-charcoal dark:text-whispr-fog ${
                         mine ? "-right-2" : "-left-2"
                       }`}
                     >
@@ -473,13 +477,13 @@ export default function ChatWindow() {
         {partnerTyping && (
           <div className="mt-3 flex justify-start">
             <div className="relative max-w-[75%] sm:max-w-[65%]">
-              <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-white px-4 py-3 shadow-sm">
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 [animation-delay:-0.3s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 [animation-delay:-0.15s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70" />
+              <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-white px-4 py-3 shadow-sm dark:bg-whispr-charcoal">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 [animation-delay:-0.3s] dark:bg-whispr-fog/70" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 [animation-delay:-0.15s] dark:bg-whispr-fog/70" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-whispr-mauve/70 dark:bg-whispr-fog/70" />
               </div>
               <span
-                className="absolute bottom-0 -left-1 h-3 w-3 bg-white"
+                className="absolute bottom-0 -left-1 h-3 w-3 bg-white dark:bg-whispr-charcoal"
                 style={{ clipPath: "polygon(100% 0, 100% 100%, 0 100%)" }}
               />
             </div>
@@ -490,15 +494,15 @@ export default function ChatWindow() {
       </div>
 
       {/* Composer */}
-      <div className="border-t border-whispr-linen bg-white px-4 py-3.5 sm:px-6">
+      <div className="border-t border-whispr-linen bg-white px-4 py-3.5 sm:px-6 dark:border-whispr-ash dark:bg-whispr-charcoal">
         {replyingTo && (
-          <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2">
+          <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2 dark:bg-whispr-onyx">
             <div className="min-w-0">
               <p className="font-body text-xs font-semibold text-whispr-coral">
                 Replying to {replyingTo.sender.id === user?.id ? "yourself" : partnerName}
               </p>
               <p
-                className={`truncate font-body text-xs text-whispr-mauve ${
+                className={`truncate font-body text-xs text-whispr-mauve dark:text-whispr-fog ${
                   replyingTo.deleted ? "italic" : ""
                 }`}
               >
@@ -509,7 +513,7 @@ export default function ChatWindow() {
               type="button"
               onClick={() => setReplyingTo(null)}
               aria-label="Cancel reply"
-              className="mt-0.5 shrink-0 text-whispr-mauve transition hover:text-whispr-noir"
+              className="mt-0.5 shrink-0 text-whispr-mauve transition hover:text-whispr-noir dark:text-whispr-fog dark:hover:text-whispr-ivory"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -523,7 +527,7 @@ export default function ChatWindow() {
             onChange={(e) => handleDraftChange(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder="Type a message…"
-            className="flex-1 rounded-full border border-whispr-linen bg-whispr-snow px-4 py-3 font-body text-sm text-whispr-noir placeholder:text-whispr-mauve/70 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/20"
+            className="flex-1 rounded-full border border-whispr-linen bg-whispr-snow px-4 py-3 font-body text-sm text-whispr-noir placeholder:text-whispr-mauve/70 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/20 dark:border-whispr-ash dark:bg-whispr-onyx dark:text-whispr-ivory dark:placeholder:text-whispr-fog/70"
           />
           <button
             onClick={handleSend}

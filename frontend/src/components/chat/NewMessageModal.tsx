@@ -39,10 +39,10 @@ export default function NewMessageModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-whispr-noir/40 px-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-        <h2 className="font-display text-2xl font-semibold text-whispr-noir">New message</h2>
-        <p className="mt-1 font-body text-sm text-whispr-mauve">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-whispr-noir/40 px-4 dark:bg-black/60">
+      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg dark:bg-whispr-charcoal">
+        <h2 className="font-display text-2xl font-semibold text-whispr-noir dark:text-whispr-ivory">New message</h2>
+        <p className="mt-1 font-body text-sm text-whispr-mauve dark:text-whispr-fog">
           Enter the email of the person you'd like to chat with.
         </p>
 
@@ -53,10 +53,10 @@ export default function NewMessageModal({
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="friend@example.com"
-            className="w-full rounded-md border border-whispr-rose/40 bg-white px-4 py-3 font-body text-sm text-whispr-noir shadow-sm placeholder:text-whispr-mauve/50 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/25"
+            className="w-full rounded-md border border-whispr-rose/40 bg-white px-4 py-3 font-body text-sm text-whispr-noir shadow-sm placeholder:text-whispr-mauve/50 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/25 dark:border-whispr-ash dark:bg-whispr-onyx dark:text-whispr-ivory dark:placeholder:text-whispr-fog/50"
           />
           {error && (
-            <p className="rounded-md bg-whispr-burgundy/10 px-3 py-2 font-body text-sm text-whispr-burgundy">
+            <p className="rounded-md bg-whispr-burgundy/10 px-3 py-2 font-body text-sm text-whispr-burgundy dark:bg-whispr-burgundy/20 dark:text-whispr-petal">
               {error}
             </p>
           )}
@@ -64,7 +64,7 @@ export default function NewMessageModal({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-full border border-whispr-rose/40 py-2.5 font-body text-sm font-semibold text-whispr-mauve hover:bg-whispr-snow"
+              className="flex-1 rounded-full border border-whispr-rose/40 py-2.5 font-body text-sm font-semibold text-whispr-mauve hover:bg-whispr-snow dark:border-whispr-ash dark:text-whispr-fog dark:hover:bg-whispr-onyx"
             >
               Cancel
             </button>
@@ -81,3 +81,5 @@ export default function NewMessageModal({
     </div>
   );
 }
+
+

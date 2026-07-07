@@ -16,11 +16,11 @@ export default function ChatLayout() {
   const { userId } = useParams<{ userId?: string }>();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-whispr-snow">
+    <div className="flex h-screen overflow-hidden bg-whispr-snow dark:bg-whispr-night">
       <div
         className={`${
           userId ? "hidden md:flex" : "flex"
-        } w-full shrink-0 flex-col border-r border-whispr-linen bg-white md:w-[380px] lg:w-[400px]`}
+        } w-full shrink-0 flex-col border-r border-whispr-linen bg-white md:w-[380px] lg:w-[400px] dark:border-whispr-ash dark:bg-whispr-charcoal`}
       >
         <ChatSidebar activeId={userId} />
       </div>

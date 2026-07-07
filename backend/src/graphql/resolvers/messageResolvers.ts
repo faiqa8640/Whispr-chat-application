@@ -8,6 +8,7 @@ import { pubsub, EVENTS } from "../pubsub.js";
 
 export { pubsub };
 
+// formatMessage is a helper function that takes a MongoDB message document and converts it into the exact shape your GraphQL frontend expects.
 function formatMessage(msg: any) {
   return {
     id: msg._id.toString(),
@@ -44,8 +45,11 @@ export const messageResolvers = {
     // _findUserByEmail____________________________________________
     // This lets a logged-in user search for another user by email.
     // parent->unknown or unused, arg->email(by frontend), ctx->authenticated request context 
+    // _ ->is the convention for the unused parameter
+    // ctx-> is the context for the each request that contain the request related information
     findUserByEmail: async (_: unknown, { email }: { email: string }, ctx: AuthContext) => {
-      requireAuth(ctx);//This prevents anonymous users from searching your user database.
+      requireAuth(ctx);//check that the user is authenticated
+      //This prevents anonymous users from searching your user database.
       const user = await User.findOne({ email: email.toLowerCase() });
       return user ? formatUser(user) : null;
     },
@@ -53,7 +57,7 @@ export const messageResolvers = {
     // _getCoversationsHistory____________________________________________
     // this gets the chat history  on the side bar
     conversations: async (_: unknown, __: unknown, ctx: AuthContext) => {
-      const me = requireAuth(ctx);
+      const me = requireAuth(ctx);//me will contain the authenticated user
       //This checks whether the current request has an authenticated user.
       const userId = me._id; // gets the current logined user id
 
@@ -82,7 +86,7 @@ export const messageResolvers = {
             unreadCount: {
               $sum: {
                 $cond: [
-                  // if current user is receiver and msg is unread -> 1 elese ->0
+                  // if current user is receiver and msg is unread -> 1 else ->0
                   { $and: [{ $eq: ["$receiver", userId] }, { $eq: ["$read", false] }] },
                   1,
                   0,
@@ -96,6 +100,7 @@ export const messageResolvers = {
       ]);
 
       // The aggregation above returns raw Message documents for `lastMessage`
+      // as the sender, receiver and replyto just contain the ids so we populate it
       const messagesToPopulate = results.map((r) => r.lastMessage).filter(Boolean);
       if (messagesToPopulate.length > 0) {
         await Message.populate(messagesToPopulate, [
@@ -130,7 +135,7 @@ export const messageResolvers = {
     // This fetches the message history between the logged-in user and another user.
     messages: async (
       _: unknown,
-      // LOAD ONLY  50 MSGS
+      // LOAD ONLY  50 MSGS by default
       // This fetches the message history between the logged-in user and another user.
       // me._id (is the current user) and withuserid -> is the other partner
       { withUserId, limit = 50 }: { withUserId: string; limit?: number },
@@ -183,7 +188,7 @@ export const messageResolvers = {
       // same conversation -- otherwise silently drop the quote rather than
       // let a client attach an arbitrary/unrelated message as a reply.
       let replyTo: string | undefined;
-      if (replyToId) {
+      if (replyToId) { 
         const original = await Message.findById(replyToId);
         if (
           original &&
