@@ -26,6 +26,13 @@ export interface IUser extends Document {
   // last-seen info available" rather than a specific date.
   lastSeen?: Date;
 
+  // Soft-delete flag. The document (and its _id) is kept forever so that
+  // existing Message.sender/receiver refs from other users' conversations
+  // still resolve — formatUser() renders this account as "Deleted User"
+  // wherever it's referenced instead of hard-deleting it.
+  isDeleted: boolean;
+  deletedAt?: Date;
+
   createdAt: Date;
   updatedAt: Date;
 
@@ -53,6 +60,9 @@ const UserSchema = new Schema<IUser>(
     resetTokenExpires: { type: Date,   select: false },
 
     lastSeen: { type: Date },
+
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
   },
   { timestamps: true }
 );

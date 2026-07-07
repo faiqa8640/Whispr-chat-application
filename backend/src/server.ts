@@ -1,4 +1,3 @@
-
 import http from "http";
 import { WebSocketServer } from "ws";
 import { useServer } from "graphql-ws/use/ws";
@@ -47,6 +46,11 @@ async function main() {
           try {
             const decoded = verifyToken(token);
             user = await User.findById(decoded.id);
+            // Same rule as the HTTP context: a deleted account's cookie
+            // doesn't grant a live socket identity even if unexpired.
+            if (user?.isDeleted) {
+              user = null;
+            }
           } catch {
             // invalid/expired — stay unauthenticated
           }

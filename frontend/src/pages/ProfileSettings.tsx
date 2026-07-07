@@ -1,7 +1,7 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { gql } from "../lib/gqlClient";
-import { UPDATE_PROFILE_MUTATION } from "../lib/mutations";
+import { UPDATE_PROFILE_MUTATION, DELETE_ACCOUNT_MUTATION } from "../lib/mutations";
 import { useAuth, type AuthUser } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import {
@@ -93,6 +93,14 @@ export default function ProfileSettings() {
   const notificationsSupported = isNotificationSupported();
   const [notificationsEnabled, setNotificationsEnabled] = useState(isNotificationsEnabledByUser());
   const [notificationPermission, setNotificationPermission] = useState(getNotificationPermission());
+
+  // Delete account — a two-step, type-to-confirm flow since this is
+  // irreversible. Kept separate from the profile-edit form's error/success
+  // state so the two don't clobber each other.
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   if (!user) return null; // ProtectedRoute already guards this route
 
@@ -190,6 +198,22 @@ export default function ProfileSettings() {
     setIsLoggingOut(true);
     await logout();
     navigate("/login");
+  }
+
+  async function handleDeleteAccount() {
+    setDeleteError("");
+    setIsDeleting(true);
+    try {
+      await gql(DELETE_ACCOUNT_MUTATION);
+      // Account + cookie are gone server-side — clear local state and
+      // bounce to login, same destination as a normal logout.
+      setUser(null);
+      navigate("/login");
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete account.");
+    } finally {
+      setIsDeleting(false);
+    }
   }
 
   return (
@@ -393,6 +417,75 @@ export default function ProfileSettings() {
         >
           {isLoggingOut ? "Logging out…" : "Log out"}
         </button>
+
+        {/* Delete account — irreversible, so it's a type-to-confirm flow */}
+        <div className="mt-4 rounded-md border border-whispr-burgundy/30 bg-whispr-burgundy/5 px-4 py-4 dark:border-whispr-burgundy/50 dark:bg-whispr-burgundy/10">
+          <p className="font-body text-sm font-semibold text-whispr-burgundy dark:text-whispr-petal">
+            Delete account
+          </p>
+          <p className="mt-1 font-body text-[11px] leading-relaxed text-whispr-mauve/80 dark:text-whispr-fog/80">
+            This permanently deletes your profile. People you've chatted with
+            will still see your old messages, shown as sent by "Deleted User" —
+            but nobody will be able to message you again, and you won't be
+            able to log back in.
+          </p>
+
+          {!showDeleteConfirm ? (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="mt-3 font-body text-xs font-semibold uppercase tracking-wider text-whispr-burgundy transition hover:text-whispr-crimson dark:text-whispr-petal"
+            >
+              Delete my account
+            </button>
+          ) : (
+            <div className="mt-3 space-y-2.5">
+              <p className="font-body text-xs text-whispr-mauve dark:text-whispr-fog">
+                Type{" "}
+                <span className="font-semibold text-whispr-noir dark:text-whispr-ivory">
+                  DELETE
+                </span>{" "}
+                to confirm.
+              </p>
+              <input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="DELETE"
+                autoFocus
+                className="w-full rounded-md border border-whispr-burgundy/40 bg-white px-3 py-2 font-body text-sm text-whispr-noir shadow-sm focus:border-whispr-burgundy focus:outline-none focus:ring-2 focus:ring-whispr-burgundy/20 dark:bg-whispr-onyx dark:text-whispr-ivory"
+              />
+
+              {deleteError && (
+                <p className="font-body text-xs text-whispr-burgundy dark:text-whispr-petal">
+                  {deleteError}
+                </p>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setDeleteConfirmText("");
+                    setDeleteError("");
+                  }}
+                  disabled={isDeleting}
+                  className="flex-1 rounded-full border border-whispr-linen py-2 font-body text-xs font-semibold uppercase tracking-wider text-whispr-mauve transition hover:bg-whispr-snow disabled:opacity-60 dark:border-whispr-ash dark:text-whispr-fog dark:hover:bg-whispr-onyx"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAccount}
+                  disabled={deleteConfirmText !== "DELETE" || isDeleting}
+                  className="flex-1 rounded-full bg-whispr-burgundy py-2 font-body text-xs font-semibold uppercase tracking-wider text-white transition hover:bg-whispr-crimson disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isDeleting ? "Deleting…" : "Permanently delete"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

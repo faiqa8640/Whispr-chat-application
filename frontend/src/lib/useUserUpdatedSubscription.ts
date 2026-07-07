@@ -10,6 +10,7 @@ interface UserUpdatedData {
     provider: "local" | "google";
     avatar: string | null;
     isVerified: boolean;
+    isDeleted: boolean;
     createdAt: string;
     updatedAt: string;
   };

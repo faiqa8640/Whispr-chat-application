@@ -22,6 +22,14 @@ export async function buildContext({
     if (token) {
       const decoded = verifyToken(token);
       user = await User.findById(decoded.id).lean() as IUser | null;
+
+      // A deleted account's cookie may still be technically valid (it
+      // hasn't expired yet) — treat it as unauthenticated regardless, so
+      // a deleted user can't query/mutate anything even with an old
+      // cached cookie.
+      if (user?.isDeleted) {
+        user = null;
+      }
     }
   } catch {
     // Invalid / expired token — context user stays null

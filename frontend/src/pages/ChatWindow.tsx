@@ -25,8 +25,8 @@ interface MessageItem {
   createdAt: string;
   read: boolean;
   deleted: boolean;
-  sender: { id: string; name: string; avatar: string | null };
-  receiver: { id: string; name: string; avatar: string | null };
+  sender: { id: string; name: string; avatar: string | null; isDeleted?: boolean };
+  receiver: { id: string; name: string; avatar: string | null; isDeleted?: boolean };
   replyTo: {
     id: string;
     content: string;
@@ -94,6 +94,13 @@ export default function ChatWindow() {
   // (only when offline) when their last connection dropped.
   const [partnerOnline, setPartnerOnline] = useState(false);
   const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
+  // Once true, this conversation is permanently locked to read-only for
+  // this session — the partner's account no longer exists. Set from the
+  // initial load, from the live userUpdated subscription, OR (as a
+  // guaranteed fallback that can't get stuck) the instant a send fails
+  // because the backend rejects it. Once locked we never unlock it —
+  // there's no path back to "undeleted".
+  const [partnerDeleted, setPartnerDeleted] = useState(false);
   // The message currently staged as a reply target — shown as a preview
   // above the composer, WhatsApp-style, until sent or cancelled.
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
@@ -114,7 +121,7 @@ export default function ChatWindow() {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function sendTyping(isTyping: boolean) {
-    if (!userId) return;
+    if (!userId || partnerDeleted) return;
     gql(SET_TYPING_MUTATION, { receiverId: userId, isTyping }).catch(() => {});
   }
 
@@ -131,7 +138,7 @@ export default function ChatWindow() {
 
   function handleDraftChange(value: string) {
     setDraft(value);
-    if (!userId) return;
+    if (!userId || partnerDeleted) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
@@ -153,6 +160,19 @@ export default function ChatWindow() {
     }, TYPING_STOP_DELAY_MS);
   }
 
+  // Locks the conversation once we learn the partner's account is gone —
+  // called from every place that can discover this (load, subscription,
+  // failed send). Idempotent and one-directional.
+  function lockAsDeleted() {
+    setPartnerDeleted(true);
+    setPartnerName("Deleted User");
+    setPartnerAvatar(null);
+    setPartnerOnline(false);
+    setPartnerLastSeen(null);
+    setPartnerTyping(false);
+    stopTypingNow();
+  }
+
   async function loadMessages() {
     if (!userId) return;
     const data = await gql<{ messages: MessageItem[] }>(MESSAGES_QUERY, {
@@ -163,21 +183,33 @@ export default function ChatWindow() {
     const withPartner = data.messages.find((m) => m.sender.id === userId || m.receiver.id === userId);
     if (withPartner) {
       const partner = withPartner.sender.id === userId ? withPartner.sender : withPartner.receiver;
-      setPartnerName(partner.name);
-      setPartnerAvatar(partner.avatar);
+      if (partner.isDeleted) {
+        lockAsDeleted();
+      } else {
+        setPartnerName(partner.name);
+        setPartnerAvatar(partner.avatar);
+      }
     }
     setLoading(false);
-    await gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId });
+    // Marking-as-read is meaningless (and would just fail loudly) for a
+    // deleted partner — skip it.
+    if (!withPartner?.sender.isDeleted && !withPartner?.receiver.isDeleted) {
+      await gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId }).catch(() => {});
+    }
   }
 
   async function loadPartnerStatus() {
     if (!userId) return;
     try {
       const data = await gql<{
-        userStatus: { userId: string; isOnline: boolean; lastSeen: string | null };
+        userStatus: { userId: string; isOnline: boolean; lastSeen: string | null; isDeleted: boolean };
       }>(USER_STATUS_QUERY, { userId });
-      setPartnerOnline(data.userStatus.isOnline);
-      setPartnerLastSeen(data.userStatus.lastSeen);
+      if (data.userStatus.isDeleted) {
+        lockAsDeleted();
+      } else {
+        setPartnerOnline(data.userStatus.isOnline);
+        setPartnerLastSeen(data.userStatus.lastSeen);
+      }
     } catch {
       // Non-critical — presence just won't show for this session.
     }
@@ -188,14 +220,18 @@ export default function ChatWindow() {
     // If we arrived here via the sidebar / new-message modal, the partner's
     // name (and avatar) was passed in router state — use it immediately
     // instead of waiting on loadMessages(), which can't find a name/avatar
-    // from an empty (brand-new) conversation's message list.
+    // from an empty (brand-new) conversation's message list. This is only
+    // a first-paint hint though — loadMessages()/loadPartnerStatus() below
+    // are what actually confirm whether the account still exists.
     const state = location.state as { partnerName?: string; partnerAvatar?: string | null } | null;
     setPartnerName(state?.partnerName ?? "");
     setPartnerAvatar(state?.partnerAvatar ?? null);
-    // Switching conversations — any stale typing/presence state doesn't apply here.
+    // Switching conversations — any stale typing/presence/deleted state
+    // from the previous conversation doesn't apply here.
     setPartnerTyping(false);
     setPartnerOnline(false);
     setPartnerLastSeen(null);
+    setPartnerDeleted(false);
     loadMessages();
     loadPartnerStatus();
 
@@ -244,9 +280,15 @@ export default function ChatWindow() {
 
   // Live profile updates — WhatsApp-style: if the person you're chatting
   // with changes their name or photo mid-conversation, patch the header
-  // immediately instead of waiting for a refresh.
+  // immediately instead of waiting for a refresh. This also carries
+  // account deletions: the moment the partner deletes their account, this
+  // fires with isDeleted: true and we lock the conversation right away.
   useUserUpdatedSubscription(({ userUpdated }) => {
     if (userUpdated.id !== userId) return;
+    if (userUpdated.isDeleted) {
+      lockAsDeleted();
+      return;
+    }
     setPartnerName(userUpdated.name);
     setPartnerAvatar(userUpdated.avatar);
   });
@@ -255,6 +297,7 @@ export default function ChatWindow() {
   // the partner connects or disconnects, no refetch needed.
   useUserStatusSubscription(({ userStatusChanged }) => {
     if (userStatusChanged.userId !== userId) return;
+    if (partnerDeleted) return; // already locked — presence no longer matters
     setPartnerOnline(userStatusChanged.isOnline);
     setPartnerLastSeen(userStatusChanged.lastSeen);
   });
@@ -284,7 +327,7 @@ export default function ChatWindow() {
   }
 
   async function handleSend() {
-    if (!draft.trim() || !userId) return;
+    if (!draft.trim() || !userId || partnerDeleted) return;
     const content = draft.trim();
     const replyToId = replyingTo?.id;
     setDraft("");
@@ -292,19 +335,36 @@ export default function ChatWindow() {
     // Sending resolves the "typing" state immediately — no need to wait
     // out the debounce timer.
     stopTypingNow();
-    const data = await gql<{ sendMessage: MessageItem }>(SEND_MESSAGE_MUTATION, {
-      receiverId: userId,
-      content,
-      replyToId,
-    });
-    setMessages((prev) =>
-      prev.some((m) => m.id === data.sendMessage.id) ? prev : [...prev, data.sendMessage]
-    );
-    // Safety net: if we still don't have a partner name/avatar (e.g. state
-    // was lost on a refresh mid-conversation), the send response always
-    // carries it.
-    setPartnerName((prev) => prev || data.sendMessage.receiver.name);
-    setPartnerAvatar((prev) => prev ?? data.sendMessage.receiver.avatar);
+    try {
+      const data = await gql<{ sendMessage: MessageItem }>(SEND_MESSAGE_MUTATION, {
+        receiverId: userId,
+        content,
+        replyToId,
+      });
+      setMessages((prev) =>
+        prev.some((m) => m.id === data.sendMessage.id) ? prev : [...prev, data.sendMessage]
+      );
+      // Safety net: if we still don't have a partner name/avatar (e.g. state
+      // was lost on a refresh mid-conversation), the send response always
+      // carries it.
+      setPartnerName((prev) => prev || data.sendMessage.receiver.name);
+      setPartnerAvatar((prev) => prev ?? data.sendMessage.receiver.avatar);
+    } catch (err) {
+      // Guaranteed fallback: whatever the reason our earlier "is this
+      // partner deleted" checks missed it (a subscription event that never
+      // arrived, a stale cache, etc), the backend is always the source of
+      // truth. If it rejects the send because the recipient no longer
+      // exists, lock the conversation permanently right here instead of
+      // leaving a working-looking composer that will just fail again.
+      const message = err instanceof Error ? err.message : "";
+      if (message.toLowerCase().includes("no longer exists")) {
+        lockAsDeleted();
+      } else {
+        // Some other transient failure — restore the draft so the person
+        // doesn't lose what they typed, and let them retry.
+        setDraft(content);
+      }
+    }
   }
 
   // Unsend one of your own messages. Optimistic: flips the bubble to the
@@ -362,14 +422,16 @@ export default function ChatWindow() {
             />
           ) : (
             <div
-              className="flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-semibold text-white"
-              style={{ background: auraFor(partnerName || "?") }}
+              className={`flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-semibold text-white ${
+                partnerDeleted ? "grayscale" : ""
+              }`}
+              style={{ background: partnerDeleted ? "#9CA3AF" : auraFor(partnerName || "?") }}
             >
-              {partnerName ? initialsFor(partnerName) : "?"}
+              {partnerDeleted ? "?" : partnerName ? initialsFor(partnerName) : "?"}
             </div>
           )}
           {/* Online presence dot on the chat header avatar too */}
-          {partnerOnline && (
+          {partnerOnline && !partnerDeleted && (
             <span
               className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-green-500 dark:border-whispr-charcoal"
               aria-label="Online"
@@ -380,8 +442,12 @@ export default function ChatWindow() {
           <h1 className="font-display text-lg font-semibold leading-tight text-whispr-noir dark:text-whispr-ivory">
             {partnerName}
           </h1>
-          {/* Priority: typing indicator > online > last seen */}
-          {partnerTyping ? (
+          {/* Priority: deleted > typing indicator > online > last seen */}
+          {partnerDeleted ? (
+            <span className="font-body text-xs text-whispr-mauve dark:text-whispr-fog">
+              This account no longer exists
+            </span>
+          ) : partnerTyping ? (
             <span className="font-body text-xs font-medium text-whispr-coral">typing…</span>
           ) : partnerOnline ? (
             <span className="font-body text-xs font-medium text-green-600 dark:text-green-400">Online</span>
@@ -496,8 +562,10 @@ export default function ChatWindow() {
                     </button>
                   )}
                   {/* Reply affordance — available on any not-yet-deleted
-                      message, mine or theirs, opposite side from unsend. */}
-                  {!m.deleted && (
+                      message, mine or theirs, opposite side from unsend.
+                      Not offered once the partner is gone — nothing to
+                      reply into anymore. */}
+                  {!m.deleted && !partnerDeleted && (
                     <button
                       onClick={() => setReplyingTo(m)}
                       aria-label="Reply"
@@ -532,7 +600,7 @@ export default function ChatWindow() {
 
         {/* Instagram/WhatsApp-style "typing..." bubble — rendered like a
             received message, with three bouncing dots instead of text. */}
-        {partnerTyping && (
+        {partnerTyping && !partnerDeleted && (
           <div className="mt-3 flex justify-start">
             <div className="relative max-w-[75%] sm:max-w-[65%]">
               <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm bg-white px-4 py-3 shadow-sm dark:bg-whispr-charcoal">
@@ -551,54 +619,64 @@ export default function ChatWindow() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Composer */}
-      <div className="border-t border-whispr-linen bg-white px-4 py-3.5 sm:px-6 dark:border-whispr-ash dark:bg-whispr-charcoal">
-        {replyingTo && (
-          <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2 dark:bg-whispr-onyx">
-            <div className="min-w-0">
-              <p className="font-body text-xs font-semibold text-whispr-coral">
-                Replying to {replyingTo.sender.id === user?.id ? "yourself" : partnerName}
-              </p>
-              <p
-                className={`truncate font-body text-xs text-whispr-mauve dark:text-whispr-fog ${
-                  replyingTo.deleted ? "italic" : ""
-                }`}
+      {/* Composer — replaced entirely with a locked banner once we know
+          the partner's account is gone, instead of leaving a working-
+          looking input that just errors on every attempt. */}
+      {partnerDeleted ? (
+        <div className="border-t border-whispr-linen bg-white px-4 py-4 text-center sm:px-6 dark:border-whispr-ash dark:bg-whispr-charcoal">
+          <p className="font-body text-sm text-whispr-mauve dark:text-whispr-fog">
+            This account no longer exists. You can't send new messages here.
+          </p>
+        </div>
+      ) : (
+        <div className="border-t border-whispr-linen bg-white px-4 py-3.5 sm:px-6 dark:border-whispr-ash dark:bg-whispr-charcoal">
+          {replyingTo && (
+            <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2 dark:bg-whispr-onyx">
+              <div className="min-w-0">
+                <p className="font-body text-xs font-semibold text-whispr-coral">
+                  Replying to {replyingTo.sender.id === user?.id ? "yourself" : partnerName}
+                </p>
+                <p
+                  className={`truncate font-body text-xs text-whispr-mauve dark:text-whispr-fog ${
+                    replyingTo.deleted ? "italic" : ""
+                  }`}
+                >
+                  {replyingTo.deleted ? "This message was unsent" : replyingTo.content}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                aria-label="Cancel reply"
+                className="mt-0.5 shrink-0 text-whispr-mauve transition hover:text-whispr-noir dark:text-whispr-fog dark:hover:text-whispr-ivory"
               >
-                {replyingTo.deleted ? "This message was unsent" : replyingTo.content}
-              </p>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
             </div>
+          )}
+          <div className="flex items-center gap-3">
+            <input
+              value={draft}
+              onChange={(e) => handleDraftChange(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              placeholder="Type a message…"
+              className="flex-1 rounded-full border border-whispr-linen bg-whispr-snow px-4 py-3 font-body text-sm text-whispr-noir placeholder:text-whispr-mauve/70 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/20 dark:border-whispr-ash dark:bg-whispr-onyx dark:text-whispr-ivory dark:placeholder:text-whispr-fog/70"
+            />
             <button
-              type="button"
-              onClick={() => setReplyingTo(null)}
-              aria-label="Cancel reply"
-              className="mt-0.5 shrink-0 text-whispr-mauve transition hover:text-whispr-noir dark:text-whispr-fog dark:hover:text-whispr-ivory"
+              onClick={handleSend}
+              disabled={!draft.trim()}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-whispr-coral to-whispr-crimson text-white shadow-sm transition hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100"
+              aria-label="Send message"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>
-        )}
-        <div className="flex items-center gap-3">
-          <input
-            value={draft}
-            onChange={(e) => handleDraftChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Type a message…"
-            className="flex-1 rounded-full border border-whispr-linen bg-whispr-snow px-4 py-3 font-body text-sm text-whispr-noir placeholder:text-whispr-mauve/70 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/20 dark:border-whispr-ash dark:bg-whispr-onyx dark:text-whispr-ivory dark:placeholder:text-whispr-fog/70"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!draft.trim()}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-whispr-coral to-whispr-crimson text-white shadow-sm transition hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100"
-            aria-label="Send message"
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-              <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

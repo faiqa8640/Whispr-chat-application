@@ -21,6 +21,27 @@ const googleClient = new OAuth2Client(ENV.GOOGLE_CLIENT_ID);
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 export function formatUser(user: InstanceType<typeof User>) {
   const id = user._id.toString();
+
+  // Deleted accounts: render a stable "Deleted User" placeholder instead of
+  // real profile info everywhere this user is referenced (messages,
+  // conversations, replyTo previews, subscriptions) — but keep the same id
+  // so existing message history for the other participant still resolves.
+  if (user.isDeleted) {
+    return {
+      id,
+      name: "Deleted User",
+      email: user.email,
+      provider: user.provider,
+      avatar: null,
+      isVerified: user.isVerified,
+      isOnline: false,
+      lastSeen: user.lastSeen ?? null,
+      isDeleted: true,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
   return {
     id,
     name: user.name,
@@ -34,6 +55,7 @@ export function formatUser(user: InstanceType<typeof User>) {
     // Only meaningful when isOnline is false; null otherwise (or for
     // accounts that have never disconnected since this field existed).
     lastSeen: user.lastSeen ?? null,
+    isDeleted: false,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -321,6 +343,54 @@ export const authResolvers = {
       pubsub.publish(EVENTS.USER_UPDATED, { userUpdated: formatted });
 
       return formatted;
+    },
+
+    // ── Delete Account ──────────────────────────────────────────────────────────
+    /**
+     * Soft-deletes the caller's account:
+     *  - The User document (and its _id) is kept forever so existing
+     *    Message.sender/receiver refs in other people's conversations still
+     *    resolve correctly.
+     *  - Personally-identifying / login-capable fields are scrubbed
+     *    (name, email, avatar, password, googleId, otp/reset tokens) so the
+     *    account can never log back in and never shows real info again.
+     *  - `isDeleted: true` makes formatUser() render this account as
+     *    "Deleted User" everywhere (sidebar rows, message bubbles, reply
+     *    previews) — old messages stay visible to the other participant.
+     *  - findUserByEmail excludes deleted users, and sendMessage refuses to
+     *    deliver to one, so nobody can start a new conversation with them.
+     */
+    deleteAccount: async (_: unknown, __: unknown, ctx: AuthContext) => {
+      const authUser = requireAuth(ctx);
+      const user = await User.findById(authUser._id);
+      if (!user) throw new Error("User not found.");
+      if (user.isDeleted) throw new Error("This account has already been deleted.");
+
+      user.isDeleted = true;
+      user.deletedAt = new Date();
+
+      user.name = "Deleted User";
+      // Anonymized but still unique (keeps the `email` unique index happy)
+      // and no longer resembles the real address.
+      user.email = `deleted-${user._id.toString()}@whispr.deleted`;
+      user.avatar = undefined;
+      user.password = undefined;       // hook's isModified guard means no re-hash attempt
+      user.googleId = undefined;
+      user.otpCode = undefined;
+      user.otpExpires = undefined;
+      user.resetToken = undefined;
+      user.resetTokenExpires = undefined;
+
+      await user.save();
+
+      // Log the (now-deleted) account out immediately.
+      clearCookie(ctx.res);
+
+      // Let anyone with a sidebar row / open chat for this person update
+      // live to "Deleted User" instead of waiting for a page refresh.
+      pubsub.publish(EVENTS.USER_UPDATED, { userUpdated: formatUser(user) });
+
+      return { success: true, message: "Your account has been deleted." };
     },
   },
 };

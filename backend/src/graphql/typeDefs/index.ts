@@ -19,6 +19,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     isOnline: Boolean!
     """When this user's last connection dropped. Null while they're online, or if never recorded."""
     lastSeen: DateTime
+    """True if this account has been deleted — profile is scrubbed and rendered as 'Deleted User'."""
+    isDeleted: Boolean!
     createdAt: DateTime!
     updatedAt: DateTime!
   }
@@ -90,6 +92,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     userId: ID!
     isOnline: Boolean!
     lastSeen: DateTime
+    """True if this account has been deleted — the frontend should lock the conversation to read-only."""
+    isDeleted: Boolean!
   }
 
   # ─── Query ───────────────────────────────────────────────────────────────────
@@ -159,6 +163,15 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     Update the logged-in user's profile.
     """
     updateProfile(name: String, avatar: String): User!
+
+    """
+    Permanently deletes the caller's account. Their profile is scrubbed and
+    rendered as "Deleted User" everywhere it's referenced (sidebar rows,
+    message bubbles, reply previews). Existing message history is preserved
+    for the other participant, but nobody can message this account again,
+    and it can never log back in.
+    """
+    deleteAccount: MessagePayload!
 
 
     # ── Message ────────────────────────────────────────────────────────────────────

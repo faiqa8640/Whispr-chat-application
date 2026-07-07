@@ -51,7 +51,9 @@ export const messageResolvers = {
     findUserByEmail: async (_: unknown, { email }: { email: string }, ctx: AuthContext) => {
       requireAuth(ctx);//check that the user is authenticated
       //This prevents anonymous users from searching your user database.
-      const user = await User.findOne({ email: email.toLowerCase() });
+      // Deleted accounts are excluded — you can't start a new conversation
+      // with someone who no longer has an active account.
+      const user = await User.findOne({ email: email.toLowerCase(), isDeleted: { $ne: true } });
       return user ? formatUser(user) : null;
     },
 
@@ -112,7 +114,10 @@ export const messageResolvers = {
       }
 
       // This fetches all chat partners in one query.-> hence partners contain all the partner jinsy chat hoi hoi
-      // r._id -> is the chat partener id 
+      // r._id -> is the chat partener id
+      // NOTE: deleted partners are intentionally NOT filtered out here —
+      // the conversation and its message history stay in the sidebar, just
+      // rendered via formatUser() as "Deleted User".
       const partners = await User.find({ _id: { $in: results.map((r) => r._id) } });
       // Create a quick lookup map
       // map stores the data as key value pair
@@ -167,14 +172,14 @@ export const messageResolvers = {
     // the userStatusChanged subscription below — this query only needs
     // to answer "what's true right now".
     userStatus: async (_: unknown, { userId }: { userId: string }, ctx: AuthContext) => {
-      requireAuth(ctx);
-      const user = await User.findById(userId).select("lastSeen");
+      requireAuth(ctx);//check weather the user is log in
+      const user = await User.findById(userId).select("lastSeen isDeleted");//find the user in the db and  get the last seen only
       return {
         userId,
-        // Online/offline is tracked in-memory (connection counts), not on
-        // the document, same as formatUser() does for the User type.
-        isOnline: isUserOnline(userId),
-        lastSeen: user?.lastSeen ?? null,
+        // Deleted accounts are always shown offline.
+        isOnline: user?.isDeleted ? false : isUserOnline(userId),
+        lastSeen: user?.lastSeen ?? null,// return the last seen if exit other wise return null -> ? means optional
+        isDeleted: !!user?.isDeleted,
       };
     },
   },
@@ -201,6 +206,9 @@ export const messageResolvers = {
 
       const receiver = await User.findById(receiverId);//find the reciever 
       if (!receiver) throw new Error("Recipient not found.");// if not present in the db then throw erro
+      // Nobody can send new messages to a deleted account — old history
+      // with them stays visible, but the conversation is a dead end.
+      if (receiver.isDeleted) throw new Error("This account no longer exists.");
 
       // If replying, make sure the quoted message actually belongs to this
       // same conversation -- otherwise silently drop the quote rather than
@@ -482,10 +490,12 @@ export const messageResolvers = {
     // same pattern as userUpdated.
     userStatusChanged: {
       subscribe: withFilter(
-        () => pubsub.asyncIterableIterator([EVENTS.USER_STATUS_CHANGED]),
+        // with filter 1) create a stream of all USER_STATUS_CHANGED events.
+        // filter each event so that only the subscribed user would receive it 
+        () => pubsub.asyncIterableIterator([EVENTS.USER_STATUS_CHANGED]),//listen to the event
         (
-          payload:
-            | {
+          payload:// is the event data publish by pubsub.mutation 
+            | {// can be this of null
                 userStatusChanged: {
                   userId: string;
                   isOnline: boolean;
@@ -493,12 +503,16 @@ export const messageResolvers = {
                 };
               }
             | undefined,
-          _args: unknown,
-          context: { user: IUser | null } | undefined
+          _args: unknown,// _args means intentionally unused 
+          context: { user: IUser | null } | undefined // context ->contain the current login user 
         ) => {
-          if (!payload) return false;
-          if (!context?.user) return false;
+          if (!payload) return false;// if no payload -> false 
+          if (!context?.user) return false;//if no context ->false
           return payload.userStatusChanged.userId !== context.user._id.toString();
+          // the above is the main filter  that filters the subscribed user
+          // if the user whose status changes is not equal to the currently subscribed user 
+          // the  return true -> as the other person will get the online status event accept the cuurently 
+          // login user...
         }
       ),
     },

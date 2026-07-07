@@ -123,6 +123,15 @@ export const UPDATE_PROFILE_MUTATION = /* GraphQL */ `
   }
 `;
 
+export const DELETE_ACCOUNT_MUTATION = /* GraphQL */ `
+  mutation DeleteAccount {
+    deleteAccount {
+      success
+      message
+    }
+  }
+`;
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 export const ME_QUERY = /* GraphQL */ `
@@ -153,7 +162,7 @@ export const FIND_USER_BY_EMAIL_QUERY = /* GraphQL */ `
 export const CONVERSATIONS_QUERY = /* GraphQL */ `
   query Conversations {
     conversations {
-      partner { id name email avatar isOnline lastSeen }
+      partner { id name email avatar isOnline lastSeen isDeleted}
       lastMessage { id content createdAt read deleted sender { id } }
       unreadCount
     }
@@ -164,9 +173,23 @@ export const MESSAGES_QUERY = /* GraphQL */ `
   query Messages($withUserId: ID!, $limit: Int) {
     messages(withUserId: $withUserId, limit: $limit) {
       id content createdAt read deleted
-      sender { id name avatar isOnline lastSeen }
-      receiver { id name avatar isOnline lastSeen }
+      sender { id name avatar isOnline lastSeen isDeleted}
+      receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content deleted sender { id name avatar } }
+    }
+  }
+`;
+
+
+// One-time fetch used when a conversation is opened — after this, live
+// updates arrive via USER_STATUS_CHANGED_SUBSCRIPTION.
+export const USER_STATUS_QUERY = /* GraphQL */ `
+  query UserStatus($userId: ID!) {
+    userStatus(userId: $userId) {
+      userId
+      isOnline
+      lastSeen
+      isDeleted
     }
   }
 `;
@@ -175,8 +198,8 @@ export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
   mutation SendMessage($receiverId: ID!, $content: String!, $replyToId: ID) {
     sendMessage(receiverId: $receiverId, content: $content, replyToId: $replyToId) {
       id content createdAt read deleted
-      sender { id name avatar isOnline lastSeen }
-      receiver { id name avatar isOnline lastSeen }
+      sender { id name avatar isOnline lastSeen isDeleted}
+      receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content deleted sender { id name avatar } }
     }
   }
@@ -243,6 +266,7 @@ export const USER_UPDATED_SUBSCRIPTION = /* GraphQL */ `
       isVerified
       isOnline
       lastSeen
+      isDeleted
       createdAt
       updatedAt
     }
@@ -277,17 +301,6 @@ export const TYPING_STATUS_SUBSCRIPTION = /* GraphQL */ `
 
 // ─── Presence (online/offline + last seen) ────────────────────────────────────
 
-// One-time fetch used when a conversation is opened — after this, live
-// updates arrive via USER_STATUS_CHANGED_SUBSCRIPTION.
-export const USER_STATUS_QUERY = /* GraphQL */ `
-  query UserStatus($userId: ID!) {
-    userStatus(userId: $userId) {
-      userId
-      isOnline
-      lastSeen
-    }
-  }
-`;
 
 // Fires whenever any user goes online or offline. Broadcast to every
 // authenticated client — consumers filter by userId themselves, same
