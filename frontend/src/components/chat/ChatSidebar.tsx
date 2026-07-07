@@ -34,6 +34,7 @@ interface ConversationItem {
     createdAt: string;
     read: boolean;
     deleted: boolean;
+    type: string;
     sender: { id: string };
   } | null;
   unreadCount: number;
@@ -120,6 +121,7 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
       read: boolean;
       deleted: boolean;
       sender: { id: string; name: string; avatar: string | null };
+      type: string;
       receiver: { id: string; name: string; avatar: string | null };
     };
     const partnerId = msg.sender.id === user?.id ? msg.receiver.id : msg.sender.id;
@@ -420,6 +422,10 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
                           {c.lastMessage
                             ? c.lastMessage.deleted
                               ? "This message was unsent"
+                              : c.lastMessage.type === "image"
+                              ? "📷 Photo"
+                              : c.lastMessage.type === "voice"
+                              ? "🎤 Voice message"
                               : c.lastMessage.content
                             : "No messages yet"}
                         </p>

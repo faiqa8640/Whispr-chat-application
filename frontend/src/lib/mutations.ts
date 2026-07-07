@@ -163,7 +163,7 @@ export const CONVERSATIONS_QUERY = /* GraphQL */ `
   query Conversations {
     conversations {
       partner { id name email avatar isOnline lastSeen isDeleted}
-      lastMessage { id content createdAt read deleted sender { id } }
+      lastMessage { id content type createdAt read deleted sender { id } }
       unreadCount
     }
   }
@@ -172,10 +172,10 @@ export const CONVERSATIONS_QUERY = /* GraphQL */ `
 export const MESSAGES_QUERY = /* GraphQL */ `
   query Messages($withUserId: ID!, $limit: Int) {
     messages(withUserId: $withUserId, limit: $limit) {
-      id content createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
-      replyTo { id content deleted sender { id name avatar } }
+      replyTo { id content type mediaUrl deleted sender { id name avatar } }
     }
   }
 `;
@@ -195,12 +195,26 @@ export const USER_STATUS_QUERY = /* GraphQL */ `
 `;
 
 export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
-  mutation SendMessage($receiverId: ID!, $content: String!, $replyToId: ID) {
-    sendMessage(receiverId: $receiverId, content: $content, replyToId: $replyToId) {
-      id content createdAt read deleted
+  mutation SendMessage(
+    $receiverId: ID!
+    $content: String
+    $type: MessageType
+    $mediaKey: String
+    $mediaDuration: Int
+    $replyToId: ID
+  ) {
+    sendMessage(
+      receiverId: $receiverId
+      content: $content
+      type: $type
+      mediaKey: $mediaKey
+      mediaDuration: $mediaDuration
+      replyToId: $replyToId
+    ) {
+      id content type mediaUrl mediaDuration createdAt read deleted
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
-      replyTo { id content deleted sender { id name avatar } }
+      replyTo { id content type mediaUrl deleted sender { id name avatar } }
     }
   }
 `;
@@ -231,10 +245,10 @@ export const SET_TYPING_MUTATION = /* GraphQL */ `
 export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageReceived {
     messageReceived {
-      id content createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted
       sender { id name avatar isOnline lastSeen }
       receiver { id name avatar isOnline lastSeen }
-      replyTo { id content deleted sender { id name avatar } }
+      replyTo { id content type mediaUrl deleted sender { id name avatar } }
     }
   }
 `;
@@ -279,7 +293,7 @@ export const USER_UPDATED_SUBSCRIPTION = /* GraphQL */ `
 export const MESSAGE_UNSENT_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageUnsent {
     messageUnsent {
-      id content createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted
       sender { id name avatar }
       receiver { id name avatar }
     }

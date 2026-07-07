@@ -7,6 +7,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     google
   }
 
+  enum MessageType {
+    text
+    image
+    voice
+  }
+
   # ─── Types ───────────────────────────────────────────────────────────────────
   type User {
     id: ID!
@@ -45,6 +51,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     id: ID!
     sender: User!
     content: String!
+    type: MessageType!
+    mediaUrl: String
     deleted: Boolean!
   }
 
@@ -53,10 +61,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     sender: User!
     receiver: User!
     content: String!
+    type: MessageType!
+    mediaUrl: String
+    mediaDuration: Int
     read: Boolean!
     deleted: Boolean!
     createdAt: DateTime!
-    """The message this one is replying to, if any."""
     replyTo: ReplyPreview
   }
 
@@ -95,6 +105,9 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     """True if this account has been deleted — the frontend should lock the conversation to read-only."""
     isDeleted: Boolean!
   }
+
+
+  
 
   # ─── Query ───────────────────────────────────────────────────────────────────
   type Query {
@@ -179,7 +192,7 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     Send a message. Pass replyToId to quote an earlier message in this
     same conversation — WhatsApp-style reply.
     """
-    sendMessage(receiverId: ID!, content: String!, replyToId: ID): Message!
+    sendMessage(receiverId: ID! content: String type: MessageType = text mediaKey: String mediaDuration: Int replyToId: ID): Message!
     markConversationRead(withUserId: ID!): Boolean!
 
     """

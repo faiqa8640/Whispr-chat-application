@@ -4,6 +4,9 @@ export interface IMessage extends Document {
   sender: mongoose.Types.ObjectId;
   receiver: mongoose.Types.ObjectId;
   content: string;
+  type: "text" | "image" | "voice";
+  mediaKey?: string;
+  mediaDuration?: number; // seconds, voice notes only
   read: boolean;
   deleted: boolean;
   replyTo?: mongoose.Types.ObjectId;
@@ -17,20 +20,19 @@ const MessageSchema = new Schema<IMessage>(
     receiver: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     content: {
       type: String,
-      // Only required while the message hasn't been unsent — once
-      // `deleted` is true we intentionally blank the content, and that
-      // blank value must be allowed to save.
+      // Only required for text messages that haven't been unsent.
       required: function (this: IMessage) {
-        return !this.deleted;
+        return !this.deleted && this.type === "text";
       },
       trim: true,
       maxlength: 5000,
+      default: "",
     },
+    type: { type: String, enum: ["text", "image", "voice"], default: "text" },
+    mediaKey: { type: String },
+    mediaDuration: { type: Number },
     read: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
-    // Optional reference to the message this one is replying to. Left
-    // unset for normal messages — only populated when the client quotes
-    // an earlier message, WhatsApp-style.
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },
   },
   { timestamps: true }
