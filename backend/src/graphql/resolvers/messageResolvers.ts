@@ -6,33 +6,36 @@ import { formatUser } from "./authResolvers.js";
 import type { IUser } from "../../models/User.js";
 import { pubsub, EVENTS } from "../pubsub.js";
 import { isUserOnline } from "../../utils/onlineStatus.js";
-import { getSignedMediaUrl } from "../../utils/s3.js";
+import { getSignedMediaUrl, deleteMediaObject } from "../../utils/s3.js";
 
 export { pubsub };
 
+//This formatMessage function takes a raw MongoDB message document and converts it into the clean message object your GraphQL API sends to the frontend
 async function formatMessage(msg: any) {
   // Once unsent, or if there's no media key, there's nothing to sign.
   let mediaUrl: string | null = null;
+  // check msg have a file stored in s3 and the msg is not deleted
   if (msg.mediaKey && !msg.deleted) {
     try {
-      mediaUrl = await getSignedMediaUrl(msg.mediaKey);
+      mediaUrl = await getSignedMediaUrl(msg.mediaKey);//create a signed url
     } catch (err) {
       console.error("Failed to sign media URL:", err);
       mediaUrl = null;
     }
   }
 
-  let replyTo = null;
+  let replyTo = null;//This creates a variable for reply data.
   if (msg.replyTo) {
     let replyMediaUrl: string | null = null;
     if (msg.replyTo.mediaKey && !msg.replyTo.deleted) {
       try {
+        // This creates a separate signed URL variable for the message being replied to.
         replyMediaUrl = await getSignedMediaUrl(msg.replyTo.mediaKey);
       } catch {
         replyMediaUrl = null;
       }
     }
-    replyTo = {
+    replyTo = {// you build the reply object that will be returned to the frontend.
       id: msg.replyTo._id.toString(),
       sender: formatUser(msg.replyTo.sender),
       content: msg.replyTo.deleted ? "" : msg.replyTo.content,
@@ -58,27 +61,47 @@ async function formatMessage(msg: any) {
 }
 
 export const messageResolvers = {
+  // __________QUERY__________________________________________________
   Query: {
+    // __________finduserbyemail__________________________________________________
     findUserByEmail: async (_: unknown, { email }: { email: string }, ctx: AuthContext) => {
-      requireAuth(ctx);
+      //  three parameters ->1) parent (_ -> exist but not used), email and then the context
+      requireAuth(ctx);// it check that whether the user  is auenthicated or not
       const user = await User.findOne({ email: email.toLowerCase(), isDeleted: { $ne: true } });
-      return user ? formatUser(user) : null;
+      // find the user and the account should not be deleted  
+      return user ? formatUser(user) : null;// if user exist -> return user else return null
     },
 
+    // __________coversation(sidebar)__________________________________________________
     conversations: async (_: unknown, __: unknown, ctx: AuthContext) => {
-      const me = requireAuth(ctx);
-      const userId = me._id;
+      const me = requireAuth(ctx);// if the user is autheticated
+      const userId = me._id;// get the user id only
 
+
+      // apply the aggregate as  it is complex and  we cant use the simple fetch
+      // the result contain 3  things
+      //1) the id of person whom we have convo with
+      // 2)the last message of there chat
+      // 3)total unread messages
       const results = await Message.aggregate([
+        // match that the user should either be the sender and the receiver
         { $match: { $or: [{ sender: userId }, { receiver: userId }] } },
+        // sort the messesing in the descending order-> the  newest one at the top
         { $sort: { createdAt: -1 } },
         {
           $group: {
+            //  if the userid = sender then return receiver else return sender 
+            // means if faiqa(sender) == faiqa(userid) then we will return  zain (the receiver)
+            // if zain (sender)!= faiqa (userid) then we will return the  zain(the sender)
+            // in both case the  id of the person will be return with whom we convo 
             _id: { $cond: [{ $eq: ["$sender", userId] }, "$receiver", "$sender"] },
+            // getting the last message -> the first message  is the newest message as above we sort them in the desending order 
+            // so the last message will get the last message of the chat
             lastMessage: { $first: "$$ROOT" },
-            unreadCount: {
-              $sum: {
-                $cond: [
+            unreadCount: {// counting the unread message
+              $sum: {// we need to sum
+                $cond: [// if receiver=userid and read is false -> it means that the user havent read the mesasge -> return the 1 and if read then return 0
+                  // and then sum them up  so  let say 3 messge is unread then 1+1+1 = 3
                   { $and: [{ $eq: ["$receiver", userId] }, { $eq: ["$read", false] }] },
                   1,
                   0,
@@ -87,67 +110,110 @@ export const messageResolvers = {
             },
           },
         },
-        { $sort: { "lastMessage.createdAt": -1 } },
+        { $sort: { "lastMessage.createdAt": -1 } }, //  now we sort the convo accoriding to the  having the newest last message
+        // like if nisha send the message at 10 30 and zain send the message at 10 40 -> then zain chat (10:40) will be at the top 
       ]);
 
+      // now we gonna populate the message 
       const messagesToPopulate = results.map((r) => r.lastMessage).filter(Boolean);
-      if (messagesToPopulate.length > 0) {
-        await Message.populate(messagesToPopulate, [
-          { path: "sender" },
-          { path: "receiver" },
+      // previously the result contain -> the  last message the id and the unread message count
+      // so firstly we just extract the last message form
+      // .filter(Boolean) removes empty values such as null, undefined, false, or an empty string
+      if (messagesToPopulate.length > 0) {//this check that atleast there is one valid last message 
+        await Message.populate(messagesToPopulate, [// if there is then we gonna populate the last mesasaage
+          // populate ->“Take these message objects and replace their referenced IDs with the actual documents from MongoDB.”
+          { path: "sender" },// so instead if the sender place the sender object
+          { path: "receiver" },// similarly instead of the receiver replace the receiver id
+          // This is a nested populate
+          //first populate the reply to msg -> the older message and in that mmsg the sender is still the refernece id so we populate the refernce id then 
           { path: "replyTo", populate: { path: "sender" } },
         ]);
       }
 
+      // partners -> are basically the person whom we have convo with 
+      // so we find he user  in the result map where the  r._id -> is the chat partner id 
+      // Find users whose _id is included in this list.(result)
+      // so the partners will get all the  user with whom we have convo with
+      // map basically stores the key value pairs 
       const partners = await User.find({ _id: { $in: results.map((r) => r._id) } });
+      // whre we are creating the partners map so that 
+      // You fetch all partner users in one database query, instead of calling User.findById() separately for every conversation.
       const partnerMap = new Map(partners.map((p) => [p._id.toString(), p]));
+
+      //results contains grouped conversation data,
+      // partnerMap contains the actual user document for each chat partner.
+      // filtered removes any conversation whose partner user cannot be found.
+      // basically this is userfull fo the delted user 
+      // if a user account was deleted but old messages still exist in the Message collection. 
+      // You do not want to return a broken conversation without a valid partner.
 
       const filtered = results.filter((r) => partnerMap.has(r._id.toString()));
 
       return Promise.all(
-        filtered.map(async (r) => ({
-          partner: formatUser(partnerMap.get(r._id.toString())!),
-          lastMessage: await formatMessage(r.lastMessage),
-          unreadCount: r.unreadCount,
+        filtered.map(async (r) => ({//For each conversation, it creates a new response object.
+          partner: formatUser(partnerMap.get(r._id.toString())!),//get the partner 
+          lastMessage: await formatMessage(r.lastMessage),//get the last mesage
+          unreadCount: r.unreadCount,//get the unread message count
         }))
       );
     },
 
+    // __________messages(inbox)__________________________________________________
     messages: async (
       _: unknown,
       { withUserId, limit = 50 }: { withUserId: string; limit?: number },
+      //  given the userid (of the partner)and the limit -> the default limit of the message history is 50
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
-      const docs = await Message.find({
+      const me = requireAuth(ctx);// check the authenticated user and get it
+      const docs = await Message.find({// find the message in whic the user is either sender or receiver
+        // of the convo  with the partener
         $or: [
           { sender: me._id, receiver: withUserId },
           { sender: withUserId, receiver: me._id },
         ],
       })
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .populate("sender")
+        .sort({ createdAt: -1 })// sort the message in the desending order
+        // oldest comes first
+        .limit(limit)// apply the limit to the messsages
+        .populate("sender")// populate the sendeer and receiver and replyto
         .populate("receiver")
         .populate({ path: "replyTo", populate: { path: "sender" } });
+        // after this the things is that the message are in the order
+        // oldest message first 
+        // i.e zain ->10:40 and then zain->10:30
 
-      const ordered = docs.reverse();
+      const ordered = docs.reverse();//so we reverse it .. now the oldeest is the newest 
+      // This formats every message before returning it.
       return Promise.all(ordered.map(formatMessage));
     },
 
+
+    // __________userstatus__________________________________________________
     userStatus: async (_: unknown, { userId }: { userId: string }, ctx: AuthContext) => {
-      requireAuth(ctx);
+      requireAuth(ctx);// check that the user is authenticated  
       const user = await User.findById(userId).select("lastSeen isDeleted");
+      // find the user by thhe id and get the last seen and is deleted
       return {
-        userId,
+        userId,// return the user id 
+        // if user is deleted then return false and if the user is not deleted the return check is user online
         isOnline: user?.isDeleted ? false : isUserOnline(userId),
+        // get the user lastseen if not exist the  return null
+        // ? -> optional 
+        // ?. -> continue only if exist
+        // ! -> I am sure this is not null or undefined
+        // !! -> convert to true and false 
         lastSeen: user?.lastSeen ?? null,
-        isDeleted: !!user?.isDeleted,
+        isDeleted: !!user?.isDeleted, 
       };
     },
   },
 
+
+  // __________MUTATION__________________________________________________
   Mutation: {
+
+    // __________send Message__________________________________________________
     sendMessage: async (
       _: unknown,
       {
@@ -161,41 +227,48 @@ export const messageResolvers = {
         receiverId: string;
         content?: string;
         type?: "text" | "image" | "voice";
-        mediaKey?: string;
-        mediaDuration?: number;
+        mediaKey?: string; // is the key if the type is the image or the voice 
+        mediaDuration?: number;// and is only  if the type is the voice 
         replyToId?: string;
       },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
+      const me = requireAuth(ctx); //check that the user is autheticated 
 
-      if (receiverId === me._id.toString()) throw new Error("You can't message yourself.");
+      // if receiver is me then i cant send message to myself so therefore throw and error
+      if (receiverId === me._id.toString()) throw new Error("You can't message yourself."); 
 
-      if (type === "text") {
+      // if the type is text
+      if (type === "text") {// cant be empty
         if (!content || !content.trim()) throw new Error("Message cannot be empty.");
-      } else {
+      } else {// if  the type is voice or image then  if the mediakey is not presend then through the error
         if (!mediaKey) throw new Error("Media upload is required for this message type.");
       }
 
-      const receiver = await User.findById(receiverId);
-      if (!receiver) throw new Error("Recipient not found.");
+      const receiver = await User.findById(receiverId);// find the receiver by id
+      if (!receiver) throw new Error("Recipient not found.");// if not exist then error
+      // if account is not delete then through the error
       if (receiver.isDeleted) throw new Error("This account no longer exists.");
 
-      let replyTo: string | undefined;
-      if (replyToId) {
-        const original = await Message.findById(replyToId);
+      let replyTo: string | undefined;// replay to can be string or undefines
+      // replytoid ->This searches the Message collection for the message being replied to.
+      if (replyToId) {// if it exist
+        const original = await Message.findById(replyToId); // find the user whom we need to replay
         if (
-          original &&
+          original &&// if the  user exist and
+          // The original message was sent by me to the receiver I am currently messaging.
           ((original.sender.toString() === me._id.toString() &&
             original.receiver.toString() === receiverId) ||
+            // The original message may have been sent in the opposite direction: from the receiver to you.
             (original.receiver.toString() === me._id.toString() &&
               original.sender.toString() === receiverId))
         ) {
+          // Only after all checks pass, the new message stores the reply reference:
           replyTo = replyToId;
         }
       }
 
-      const message = await Message.create({
+      const message = await Message.create({//creating the  message
         sender: me._id,
         receiver: receiverId,
         content: type === "text" ? content!.trim() : "",
@@ -206,29 +279,34 @@ export const messageResolvers = {
       });
 
       const populated = await message.populate<{ sender: any; receiver: any; replyTo: any }>([
+        // populating the message
         "sender",
         "receiver",
         { path: "replyTo", populate: "sender" },
       ]);
-      const formatted = await formatMessage(populated);
+      const formatted = await formatMessage(populated);//formatting the message 
 
+
+      // publishing the message recived event
       pubsub.publish(EVENTS.MESSAGE_RECEIVED, { messageReceived: formatted });
       return formatted;
     },
 
+
+    // __________markconvoread__________________________________________________
     markConversationRead: async (
       _: unknown,
       { withUserId }: { withUserId: string },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
-      const result = await Message.updateMany(
+      const me = requireAuth(ctx);//authenticated user
+      const result = await Message.updateMany(//if the sender is the partner and i am receiver and read is false
         { sender: withUserId, receiver: me._id, read: false },
-        { $set: { read: true } }
+        { $set: { read: true } }// then set read true
       );
 
-      if (result.modifiedCount > 0) {
-        pubsub.publish(EVENTS.MESSAGES_READ, {
+      if (result.modifiedCount > 0) {// if the count of message mark as read is greater then zero
+        pubsub.publish(EVENTS.MESSAGES_READ, {// then  publish the event
           messagesRead: {
             readerId: me._id.toString(),
             conversationWith: withUserId,
@@ -239,39 +317,81 @@ export const messageResolvers = {
       return true;
     },
 
+    // __________unsendmessage__________________________________________________
+    /**
+     * Unsend a message you sent — but unlike the old soft-delete version,
+     * this now PERMANENTLY removes it:
+     *  - If it's an image/voice message, the underlying S3 object is
+     *    deleted first (best-effort — a failed S3 cleanup doesn't block
+     *    the message itself from being removed, we just log it).
+     *  - The Message document itself is then hard-deleted from Mongo,
+     *    not just scrubbed + flagged. There's no restore feature in this
+     *    app, so keeping a permanently-scrubbed row (or an orphaned file
+     *    sitting in the bucket) forever serves no purpose.
+     *  - We still publish MESSAGE_UNSENT with a deleted:true payload so
+     *    the other participant's already-open chat flips the bubble to
+     *    the "unsent" placeholder live, same as before. The difference is
+     *    only visible on a fresh fetch afterwards: since the row is gone
+     *    from the DB, it won't come back at all (no placeholder), and any
+     *    reply that quoted it will just show without a quoted preview.
+     */
     unsendMessage: async (
       _: unknown,
-      { messageId }: { messageId: string },
+      { messageId }: { messageId: string },// message id is send 
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
+      const me = requireAuth(ctx);//check auth
 
       const message = await Message.findById(messageId).populate<{ sender: any; receiver: any }>([
+        // the message is found and the sender and receiver are populated 
         "sender",
         "receiver",
       ]);
-      if (!message) throw new Error("Message not found.");
+      if (!message) throw new Error("Message not found.");  // if not exist thenn error
 
       if (message.sender._id.toString() !== me._id.toString()) {
+        // if you dont send that message it means you cant unsend them
         throw new Error("You can only unsend messages you sent.");
       }
 
-      if (message.deleted) {
-        return formatMessage(message);
+      // Clean up the S3 object BEFORE touching the DB row — if this were
+      // reversed and the DB delete succeeded but this failed, we'd have
+      // no record left pointing at the orphaned file to clean it up later.
+      if (message.mediaKey) {
+        try {
+          await deleteMediaObject(message.mediaKey);
+        } catch (err) {
+          // Best-effort — even if S3 cleanup fails, still proceed with
+          // permanently removing the message itself below.
+          console.error("Failed to delete media from S3:", err);
+        }
       }
 
-      message.deleted = true;
-      message.content = "";
-      // Wipe the media reference too — formatMessage() already blanks the
-      // URL for deleted messages, but this keeps the DB doc clean as well.
-      message.mediaKey = undefined;
-      await message.save();
+      // Build the response BEFORE the doc is removed from Mongo — there's
+      // nothing left to read from once deleteOne() below runs.
+      const formatted = {
+        id: message._id.toString(),
+        sender: formatUser(message.sender),
+        receiver: formatUser(message.receiver),
+        content: "",
+        type: message.type || "text",
+        mediaUrl: null,
+        mediaDuration: message.mediaDuration ?? null,
+        read: message.read,
+        deleted: true,
+        createdAt: message.createdAt,
+        replyTo: null,
+      };
 
-      const formatted = await formatMessage(message);
+      // Permanently remove the message — hard delete, not soft delete.
+      await message.deleteOne();
+
       pubsub.publish(EVENTS.MESSAGE_UNSENT, { messageUnsent: formatted });
+      //publish the event
       return formatted;
     },
 
+    // __________settyping__________________________________________________
     setTyping: async (
       _: unknown,
       { receiverId, isTyping }: { receiverId: string; isTyping: boolean },
@@ -285,19 +405,24 @@ export const messageResolvers = {
     },
   },
 
+  // __________SUBSCRIPION__________________________________________________
   Subscription: {
+    // // __________MESSAGE RECIEVED__________________________________________________
     messageReceived: {
-      subscribe: withFilter(
+      subscribe: withFilter(// with filter  is used to filter the user who would receive the message
+        // Listen continuously for events published under MESSAGE_RECEIVED.
         () => pubsub.asyncIterableIterator([EVENTS.MESSAGE_RECEIVED]),
         (
-          payload: { messageReceived: any } | undefined,
-          _args: unknown,
+          payload: { messageReceived: any } | undefined,//This is the data that was published in the mutation
+          _args: unknown,//These are subscription arguments sent by the frontend.
+          // This is the context created for the WebSocket subscription connection.
+          // it contains the authenticated user
           context: { user: IUser | null } | undefined
         ) => {
-          if (!payload || !context) return false;
-          const userId = context.user?._id?.toString();
-          if (!userId) return false;
-          return (
+          if (!payload || !context) return false; // if payload and context is miising return false
+          const userId = context.user?._id?.toString();// get the user id from the context
+          if (!userId) return false;// if not exist then return false
+          return (// return true if the subscriber is either sender or reciever of the message 
             payload.messageReceived.sender.id === userId ||
             payload.messageReceived.receiver.id === userId
           );
@@ -305,9 +430,10 @@ export const messageResolvers = {
       ),
     },
 
+    // // __________MESSAGES READ__________________________________________________
     messagesRead: {
       subscribe: withFilter(
-        () => pubsub.asyncIterableIterator([EVENTS.MESSAGES_READ]),
+        () => pubsub.asyncIterableIterator([EVENTS.MESSAGES_READ]),// pulish read event
         (
           payload: { messagesRead: { readerId: string; conversationWith: string } } | undefined,
           _args: unknown,
@@ -317,10 +443,13 @@ export const messageResolvers = {
           const userId = context.user?._id?.toString();
           if (!userId) return false;
           return payload.messagesRead.conversationWith === userId;
+          //let say convo with =zain and readid=faiqa
+          // if zain=zain then  event is listen by him and he can notice blue tick as message is read
         }
       ),
     },
 
+    // __________USER UPLOADED__________________________________________________
     userUpdated: {
       subscribe: withFilter(
         () => pubsub.asyncIterableIterator([EVENTS.USER_UPDATED]),
@@ -335,6 +464,7 @@ export const messageResolvers = {
       ),
     },
 
+    // __________MESSAGE UNSENT__________________________________________________
     messageUnsent: {
       subscribe: withFilter(
         () => pubsub.asyncIterableIterator([EVENTS.MESSAGE_UNSENT]),
@@ -354,6 +484,8 @@ export const messageResolvers = {
       ),
     },
 
+
+    // __________TYPING STATUS__________________________________________________
     typingStatus: {
       subscribe: withFilter(
         () => pubsub.asyncIterableIterator([EVENTS.TYPING]),
@@ -372,6 +504,7 @@ export const messageResolvers = {
       ),
     },
 
+    // __________USER STATUS CHANGES__________________________________________________
     userStatusChanged: {
       subscribe: withFilter(
         () => pubsub.asyncIterableIterator([EVENTS.USER_STATUS_CHANGED]),

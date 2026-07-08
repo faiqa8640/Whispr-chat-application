@@ -1,90 +1,92 @@
-/**
- * Thin wrapper around the browser Notification API for WhatsApp-style
- * "new message" push notifications. Kept dependency-free and defensive —
- * every function no-ops safely on browsers/contexts where Notifications
- * aren't available (SSR, unsupported browsers, permission denied, etc).
- */
-
 export function isNotificationSupported(): boolean {
+  // this check that weather the window exist  in the browser
+  // and the broweser have notification api in the window
+  // if both condition is true then the notifications are supported
   return typeof window !== "undefined" && "Notification" in window;
 }
 
+// This is the key used to store the user’s in-app preference in localStorage.
+// Your browser storage may contain "whispr:notificationsEnabled": "true"
 const NOTIFICATIONS_PREF_KEY = "whispr:notificationsEnabled";
 
-/**
- * Whether the *person* wants message notifications, as opposed to whether
- * the browser has granted permission for them. This is the WhatsApp-style
- * in-app toggle (Profile settings), separate from the OS-level permission
- * dialog. Defaults to true (opted-in) so nothing changes for existing
- * users until they explicitly flip it off.
- */
+
+
+// our app have two notification decisions
+// 1)In-app preference->controlled by  user ->notification on and off
+// 2)Browser permission ->controlled by the browser or the operating system 
+
+
+// This function checks whether the user enabled notifications in your Profile settings.
 export function isNotificationsEnabledByUser(): boolean {
+  // If this code runs outside the browser, return true.
+  // Why true? Because the default app preference is “notifications enabled.”
   if (typeof window === "undefined") return true;
   try {
+    // This reads the saved setting. -> true/false/null
     const stored = window.localStorage.getItem(NOTIFICATIONS_PREF_KEY);
     return stored === null ? true : stored === "true";
+    // if stored=null -> return true
   } catch {
-    // Storage unavailable (e.g. private mode) — fall back to "on".
+    // If reading localStorage fails, treat notifications as enabled by default.
     return true;
   }
 }
 
-/** Persists the in-app notification preference set from Profile settings. */
+//This function saves the user’s Profile-settings choice.
+// enabled -> true or false 
 export function setNotificationsEnabledByUser(enabled: boolean): void {
   if (typeof window === "undefined") return;
   try {
+    // This saves the boolean as a string because localStorage only stores strings.
     window.localStorage.setItem(NOTIFICATIONS_PREF_KEY, String(enabled));
   } catch {
     // Ignore — worst case the choice doesn't persist across reloads.
   }
 }
 
-/** Current permission state, or null if the API isn't supported at all. */
+//This returns the browser’s current notification permission state.
 export function getNotificationPermission(): NotificationPermission | null {
+  //NotificationPermission have the values  default, granted, denied 
+  // If notifications are unsupported, return null.
   if (!isNotificationSupported()) return null;
+  //If supported, return the browser’s current permission. -> i.e default
   return Notification.permission;
+  // default ->The user has not been asked yet.
+  // granted ->The user allowed notifications.
+  // denied -> The user blocked notifications.
 }
 
-/**
- * Prompts the browser's permission dialog if we're still in the "default"
- * (not yet asked) state. Safe to call repeatedly — it's a no-op once the
- * person has already granted or denied.
- */
+//This function asks the browser to show its notification-permission popup.
 export async function requestNotificationPermission(): Promise<NotificationPermission | null> {
   if (!isNotificationSupported()) return null;
-  if (Notification.permission !== "default") return Notification.permission;
+  if (Notification.permission !== "default") return Notification.permission;// return thr perimission
 
   try {
+    // This opens the browser permission dialog. -> the user may choose granted or denied
     return await Notification.requestPermission();
   } catch {
     return Notification.permission;
   }
 }
 
-/**
- * Decides whether an incoming message for `partnerId` should trigger a
- * notification, mirroring WhatsApp's behavior:
- *  - If the tab is hidden/unfocused, always notify (regardless of which
- *    chat is "open" in the background).
- *  - If the tab is visible+focused AND the message is for the conversation
- *    the person is currently looking at, don't notify — they can already
- *    see it arrive in the chat window.
- *  - Otherwise (visible/focused but a *different* conversation), notify.
- */
+//This decides whether an incoming message should create a notification.
 export function shouldNotify(partnerId: string, activeId?: string): boolean {
   // Respect the in-app toggle first — if the person turned notifications
   // off in Profile settings, nothing below matters.
   if (!isNotificationsEnabledByUser()) return false;
 
   const isLookingAtThisChat =
-    partnerId === activeId &&
-    typeof document !== "undefined" &&
-    document.visibilityState === "visible" &&
-    document.hasFocus();
+  // This checks whether the user is actively looking at the exact conversation where the message arrived.
+    partnerId === activeId &&//is the ID of the person who sent the incoming message.
+    typeof document !== "undefined" &&//The code is running in a browser where document exists.
+    document.visibilityState === "visible" &&//The browser tab is visible, not hidden in the background.
+    document.hasFocus();//The browser window is actively focused.
 
-  return !isLookingAtThisChat;
+  return !isLookingAtThisChat;// if true -> see notification
+  //  if false -> No notification is shown because the user can already see the message in the open chat. 
 }
 
+//This creates a TypeScript shape for the object passed into showMessageNotification.
 interface ShowMessageNotificationOptions {
   /** Used as both the notification title and to group repeats from the same sender. */
   partnerId: string;
@@ -95,11 +97,7 @@ interface ShowMessageNotificationOptions {
   onClick?: () => void;
 }
 
-/**
- * Fires an OS-level push notification for an incoming message. Assumes the
- * caller has already checked permission + shouldNotify(); this function
- * just does the actual display + click wiring.
- */
+//This function creates and displays the actual browser/OS notification.
 export function showMessageNotification({
   partnerId,
   senderName,

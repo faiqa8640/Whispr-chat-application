@@ -21,6 +21,8 @@ export async function buildContext({
     const token: string | undefined = req.cookies?.delina_token;
     if (token) {
       const decoded = verifyToken(token);
+      // .lean ->Return a plain JavaScript object, not a full Mongoose document.
+      // without it ->will return the db document with extra methods
       user = await User.findById(decoded.id).lean() as IUser | null;
 
       // A deleted account's cookie may still be technically valid (it

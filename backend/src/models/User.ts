@@ -70,15 +70,15 @@ const UserSchema = new Schema<IUser>(
 UserSchema.pre<IUser>("save", async function () {
   if (!this.isModified("password") || !this.password) return;
 
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+  const salt = await bcrypt.genSalt(10);//10 -> is the salt number and is the length ->generate a random number
+  this.password = await bcrypt.hash(this.password, salt);// we hash the password
 });
 
 UserSchema.methods.matchPassword = async function (
-  enteredPassword: string
-): Promise<boolean> {
-  if (!this.password) return false;
-  return bcrypt.compare(enteredPassword, this.password);
+  enteredPassword: string// contain the enter password
+): Promise<boolean> {// return true or false
+  if (!this.password) return false; // if this password dont exist then return
+  return bcrypt.compare(enteredPassword, this.password);// and then compare the password 
 };
 
 const User: Model<IUser> = mongoose.model<IUser>("User", UserSchema);

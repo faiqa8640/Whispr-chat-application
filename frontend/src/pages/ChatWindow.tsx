@@ -156,7 +156,7 @@ export default function ChatWindow() {
       isTypingActiveRef.current = true;
       sendTyping(true);
     }
-
+    
     typingTimeoutRef.current = setTimeout(() => {
       isTypingActiveRef.current = false;
       sendTyping(false);
