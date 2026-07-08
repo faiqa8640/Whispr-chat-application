@@ -9,6 +9,8 @@ import { resolvers } from "./graphql/resolvers/index.js";
 import { buildContext } from "./middleware/authContext.js";
 import { ENV } from "./config/env.js";
 import uploadRouter from "./routes/upload.js"; // NEW
+import mediaProxyRouter from "./routes/mediaProxy.js";// FOR THE MEDIA AS THE THING IS THAT THE 
+// WE NEED TO CHNAGE THE CORS OF THE BUCKET SO AS WE CANT DO IT SO WE DID THIS 
 
 export const schema = makeExecutableSchema({ typeDefs, resolvers });
 
@@ -38,6 +40,7 @@ export async function createApp() {
 
   // NEW — REST endpoint for image/voice uploads
   app.use("/api", uploadRouter);
+  app.use("/api", mediaProxyRouter);
 
   return app;
 }

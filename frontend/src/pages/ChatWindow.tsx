@@ -46,6 +46,10 @@ interface MessageItem {
 const TYPING_STOP_DELAY_MS = 2000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 
+// Base URL of our own backend — used both for GraphQL/upload calls
+// elsewhere in the app and here for the download-proxy endpoint below.
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 function auraFor(_name: string) {
   return "linear-gradient(135deg, #A06CD5, #815AC0)";
 }
@@ -89,6 +93,109 @@ function formatDuration(seconds: number | null) {
   return `${m}:${s}`;
 }
 
+// ── Image lightbox ──────────────────────────────────────────────────────────
+// WhatsApp-style: tapping a photo bubble opens it full-size on a dark
+// overlay, with a way to actually save the file (not just view it inline).
+function ImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+
+  async function handleDownload() {
+    setDownloadError("");
+    setIsDownloading(true);
+    try {
+      // We DON'T fetch the S3 signed URL directly from the browser — the
+      // bucket is shared across other teams' projects and isn't (and
+      // shouldn't be, without going through the team lead) configured
+      // with CORS for our origin, so a direct `fetch(url)` here would
+      // always fail with a CORS error, even though the <img> tag above
+      // can render it fine (plain <img> loads never go through CORS).
+      //
+      // Instead we route through our own backend: browser -> our server
+      // (same-origin, no CORS involved) -> our server fetches the S3
+      // bytes itself (server-to-server calls are never subject to CORS,
+      // that's a browser-only restriction) -> streams them back to us.
+      // The bucket's configuration is never touched.
+      const filename = `whispr-photo-${Date.now()}.jpg`;
+      const proxyUrl = `${API_BASE}/api/download?url=${encodeURIComponent(
+        url
+      )}&filename=${encodeURIComponent(filename)}`;
+
+      const res = await fetch(proxyUrl, { credentials: "include" });
+      if (!res.ok) throw new Error("Could not fetch the image.");
+      const blob = await res.blob();
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      setDownloadError("Couldn't download the image. Try again.");
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 px-4 py-8"
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      <img
+        src={url}
+        alt="Full size"
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
+      />
+
+      <div
+        className="absolute bottom-8 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={handleDownload}
+          disabled={isDownloading}
+          className="flex items-center gap-2 rounded-full bg-white px-5 py-2.5 font-body text-sm font-semibold text-whispr-noir shadow-lg transition hover:bg-whispr-linen disabled:opacity-70"
+        >
+          {isDownloading ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-whispr-noir border-t-transparent" />
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+          {isDownloading ? "Downloading…" : "Save image"}
+        </button>
+        {downloadError && (
+          <p className="rounded-md bg-white/10 px-3 py-1.5 font-body text-xs text-white">{downloadError}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ChatWindow() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
@@ -106,6 +213,9 @@ export default function ChatWindow() {
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
+  // Holds the mediaUrl of whichever photo is currently open in the
+  // full-size lightbox; null means the lightbox is closed.
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -156,7 +266,7 @@ export default function ChatWindow() {
       isTypingActiveRef.current = true;
       sendTyping(true);
     }
-    
+
     typingTimeoutRef.current = setTimeout(() => {
       isTypingActiveRef.current = false;
       sendTyping(false);
@@ -607,12 +717,22 @@ export default function ChatWindow() {
                         This message was unsent
                       </span>
                     ) : m.type === "image" && m.mediaUrl ? (
-                      <img
-                        src={m.mediaUrl}
-                        alt="Shared photo"
-                        className="max-h-72 max-w-[260px] rounded-xl object-cover"
-                        loading="lazy"
-                      />
+                      // WhatsApp-style: the thumbnail is a button — tapping it
+                      // opens the full-size lightbox (with a save/download
+                      // option) instead of just sitting there as a static img.
+                      <button
+                        type="button"
+                        onClick={() => setViewingImage(m.mediaUrl)}
+                        className="block"
+                        aria-label="Open photo"
+                      >
+                        <img
+                          src={m.mediaUrl}
+                          alt="Shared photo"
+                          className="max-h-72 max-w-[260px] rounded-xl object-cover"
+                          loading="lazy"
+                        />
+                      </button>
                     ) : m.type === "voice" && m.mediaUrl ? (
                       <div className="flex flex-col gap-1">
                         <audio controls src={m.mediaUrl} className="h-9 w-[220px]" />
@@ -838,6 +958,11 @@ export default function ChatWindow() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Full-size photo lightbox — only mounted while a photo is open */}
+      {viewingImage && (
+        <ImageLightbox url={viewingImage} onClose={() => setViewingImage(null)} />
       )}
     </div>
   );
