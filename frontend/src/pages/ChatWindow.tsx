@@ -96,6 +96,97 @@ function formatDuration(seconds: number | null) {
   return `${m}:${s}`;
 }
 
+// ── Image bubble w/ skeleton loader ─────────────────────────────────────────
+// WhatsApp/Instagram-style: while the S3 signed URL is loading, show a grey
+// rounded-rect placeholder (same shimmer sweep as the voice-message
+// skeleton) at roughly the size/aspect ratio the real photo bubble will
+// take up. Once `onLoad` fires, the skeleton unmounts and the image fades
+// in in place — no layout jump, since both occupy the same box. If the
+// request fails (`onError`), swap to a small inline error state with a
+// Retry button that remounts the <img> (forcing a fresh request) rather
+// than silently leaving a broken-image icon.
+function ChatImage({ url, onOpen }: { url: string; onOpen: () => void }) {
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [attempt, setAttempt] = useState(0);
+
+  function handleRetry(e: React.MouseEvent) {
+    e.stopPropagation();
+    setStatus("loading");
+    setAttempt((a) => a + 1);
+  }
+
+  return (
+    <div className="relative h-56 w-56 max-w-[260px]">
+      {/* Skeleton / error placeholder — sits behind the <img>, same
+          rounded box, same footprint, so nothing shifts when the real
+          photo (or the error state) takes over. */}
+      {status !== "loaded" && (
+        <div className="absolute inset-0 overflow-hidden rounded-xl bg-whispr-linen dark:bg-whispr-onyx">
+          {status === "loading" ? (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-white/15"
+            />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                className="text-whispr-mauve dark:text-whispr-fog"
+              >
+                <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M3 16l5-5 4 4 3-3 6 6"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="8" cy="9" r="1.3" fill="currentColor" />
+              </svg>
+              <p className="font-body text-[11px] leading-tight text-whispr-mauve dark:text-whispr-fog">
+                Couldn't load image
+              </p>
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="rounded-full bg-whispr-coral px-3 py-1 font-body text-[11px] font-semibold text-white transition hover:bg-whispr-crimson"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* The real image is always mounted (once `attempt` changes it
+          remounts via `key`, forcing a fresh network request on retry)
+          so the browser starts fetching immediately — it just stays
+          invisible until it's actually ready, then fades in. */}
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label="Open photo"
+        className={`block h-full w-full ${status === "error" ? "pointer-events-none" : ""}`}
+      >
+        <img
+          key={attempt}
+          src={url}
+          alt="Shared photo"
+          loading="lazy"
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+          className={`h-full w-full rounded-xl object-cover transition-opacity duration-300 ${
+            status === "loaded" ? "opacity-100" : "opacity-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 // ── Image lightbox ──────────────────────────────────────────────────────────
 // WhatsApp-style: tapping a photo bubble opens it full-size on a dark
 // overlay, with a way to actually save the file (not just view it inline).
@@ -783,22 +874,7 @@ export default function ChatWindow() {
                         This message was unsent
                       </span>
                     ) : m.type === "image" && m.mediaUrl ? (
-                      // WhatsApp-style: the thumbnail is a button — tapping it
-                      // opens the full-size lightbox (with a save/download
-                      // option) instead of just sitting there as a static img.
-                      <button
-                        type="button"
-                        onClick={() => setViewingImage(m.mediaUrl)}
-                        className="block"
-                        aria-label="Open photo"
-                      >
-                        <img
-                          src={m.mediaUrl}
-                          alt="Shared photo"
-                          className="max-h-72 max-w-[260px] rounded-xl object-cover"
-                          loading="lazy"
-                        />
-                      </button>
+                      <ChatImage url={m.mediaUrl} onOpen={() => setViewingImage(m.mediaUrl)} />
                     ) : m.type === "voice" && m.mediaUrl ? (
                       <VoiceMessagePlayer
                         url={m.mediaUrl}
@@ -929,11 +1005,6 @@ export default function ChatWindow() {
 
           {isRecording ? (
             /* Recording bar replaces the normal composer while active */
-            // <div className="flex items-center gap-3 rounded-full border border-whispr-coral/40 bg-whispr-snow px-4 py-2.5 dark:bg-whispr-onyx">
-            //   <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-whispr-burgundy" />
-            //   <span className="font-body text-sm text-whispr-noir dark:text-whispr-ivory">
-            //     Recording… {formatDuration(recordSeconds)}
-            //   </span>
             <div className="flex items-center gap-3 rounded-full border border-whispr-coral/40 bg-whispr-snow px-4 py-2.5 dark:bg-whispr-onyx">
               <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-whispr-burgundy" />
               <span className="shrink-0 font-body text-sm tabular-nums text-whispr-noir dark:text-whispr-ivory">
