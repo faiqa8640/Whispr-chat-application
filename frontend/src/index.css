@@ -31,3 +31,52 @@ input:-webkit-autofill:focus {
   -webkit-text-fill-color: #F4EEFC; /* whispr-ivory */
   box-shadow: 0 0 0px 1000px #1D1730 inset; /* whispr-charcoal */
 }
+
+/* ─── WhatsApp-style scrollbars ──────────────────────────────────────────
+   Thin, no visible track, and the thumb itself stays fully transparent
+   until you hover the scrollable area — then a soft, muted thumb fades
+   in. This applies everywhere (chat pane, sidebar list, settings page)
+   instead of the chunky default OS scrollbar. */
+* {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: transparent transparent; /* Firefox: thumb, track */
+}
+
+*:hover {
+  scrollbar-color: rgba(124, 106, 147, 0.35) transparent; /* whispr-mauve, muted */
+}
+
+.dark *:hover {
+  scrollbar-color: rgba(167, 155, 196, 0.28) transparent; /* whispr-fog, muted */
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(124, 106, 147, 0.35);
+}
+
+.dark *:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(167, 155, 196, 0.28);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(124, 106, 147, 0.55);
+}
+
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(167, 155, 196, 0.45);
+}

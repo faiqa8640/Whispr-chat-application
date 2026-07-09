@@ -21,6 +21,7 @@ import { useTypingSubscription } from "../lib/useTypingSubscription";
 import { useUserStatusSubscription } from "../lib/useUserStatusSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
 import VoiceMessagePlayer from "../components/chat/VoiceMessagePlayer";
+import RecordingWaveform from "../components/chat/RecordingWaveform";
 
 type MessageKind = "text" | "image" | "voice";
 
@@ -220,6 +221,12 @@ export default function ChatWindow() {
   const [viewingImage, setViewingImage] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // True once this conversation has painted its messages and done its
+  // first scroll-to-bottom. WhatsApp/Instagram both open a chat already
+  // sitting at the last message — no visible scroll animation — and only
+  // animate the scroll for messages that arrive *after* you're already
+  // looking at the chat. Reset whenever you switch conversations.
+  const hasScrolledOnceRef = useRef(false);
 
   // ── Media sharing state ─────────────────────────────────────────────────
   const [mediaError, setMediaError] = useState("");
@@ -227,6 +234,7 @@ export default function ChatWindow() {
   const [isUploadingVoice, setIsUploadingVoice] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [liveRecordStream, setLiveRecordStream] = useState<MediaStream | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -335,6 +343,7 @@ export default function ChatWindow() {
     setPartnerLastSeen(null);
     setPartnerDeleted(false);
     setMediaError("");
+    hasScrolledOnceRef.current = false;
     loadMessages();
     loadPartnerStatus();
 
@@ -345,8 +354,14 @@ export default function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // First paint of a conversation snaps straight to the bottom (no
+  // animation, WhatsApp/Instagram-style) — every scroll after that, for
+  // messages arriving while you're already looking at the chat, eases in
+  // smoothly instead.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length === 0 && !partnerTyping) return;
+    bottomRef.current?.scrollIntoView({ behavior: hasScrolledOnceRef.current ? "smooth" : "auto" });
+    hasScrolledOnceRef.current = true;
   }, [messages, partnerTyping]);
 
   useMessageSubscription((data) => {
@@ -523,8 +538,16 @@ export default function ChatWindow() {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
       recordStreamRef.current = stream;
+      setLiveRecordStream(stream);
       audioChunksRef.current = [];
       recordCancelledRef.current = false;
 
@@ -537,6 +560,7 @@ export default function ChatWindow() {
 
       recorder.onstop = async () => {
         recordStreamRef.current?.getTracks().forEach((t) => t.stop());
+        setLiveRecordStream(null);
         if (recordTimerRef.current) {
           clearInterval(recordTimerRef.current);
           recordTimerRef.current = null;
@@ -905,11 +929,17 @@ export default function ChatWindow() {
 
           {isRecording ? (
             /* Recording bar replaces the normal composer while active */
+            // <div className="flex items-center gap-3 rounded-full border border-whispr-coral/40 bg-whispr-snow px-4 py-2.5 dark:bg-whispr-onyx">
+            //   <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-whispr-burgundy" />
+            //   <span className="font-body text-sm text-whispr-noir dark:text-whispr-ivory">
+            //     Recording… {formatDuration(recordSeconds)}
+            //   </span>
             <div className="flex items-center gap-3 rounded-full border border-whispr-coral/40 bg-whispr-snow px-4 py-2.5 dark:bg-whispr-onyx">
-              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-whispr-burgundy" />
-              <span className="font-body text-sm text-whispr-noir dark:text-whispr-ivory">
-                Recording… {formatDuration(recordSeconds)}
+              <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-whispr-burgundy" />
+              <span className="shrink-0 font-body text-sm tabular-nums text-whispr-noir dark:text-whispr-ivory">
+                {formatDuration(recordSeconds)}
               </span>
+              <RecordingWaveform stream={liveRecordStream} />
               <div className="ml-auto flex items-center gap-2">
                 <button
                   type="button"

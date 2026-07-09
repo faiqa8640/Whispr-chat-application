@@ -45,10 +45,18 @@ export default {
           "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        // Sweeping highlight for skeleton/loading states (voice-message
+        // waveform placeholder) — a translucent band travels left to
+        // right across the flat grey bars, WhatsApp-style.
+        shimmer: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
       },
       animation: {
         slideDown: "slideDown 0.4s ease-out",
         fadeIn: "fadeIn 0.2s ease-out",
+        shimmer: "shimmer 1.4s ease-in-out infinite",
       },
     },
   },
