@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
+import Picker from "@emoji-mart/react";
+import data from "@emoji-mart/data";
 import { gql } from "../lib/gqlClient";
 import {
   MESSAGES_QUERY,
@@ -408,6 +410,12 @@ export default function ChatWindow() {
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordCancelledRef = useRef(false);
 
+  // ── Emoji picker ─────────────────────────────────────────────────────────
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
+
   const isTypingActiveRef = useRef(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -447,6 +455,43 @@ export default function ChatWindow() {
       isTypingActiveRef.current = false;
       sendTyping(false);
     }, TYPING_STOP_DELAY_MS);
+  }
+
+  // Close the emoji popover on any click outside it (or its trigger button),
+  // same pattern as the reply/lightbox overlays elsewhere in this file.
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(target) &&
+        emojiButtonRef.current &&
+        !emojiButtonRef.current.contains(target)
+      ) {
+        setShowEmojiPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showEmojiPicker]);
+
+  // Inserts the picked emoji at the current cursor position (falls back to
+  // appending at the end if we can't read a selection), routes the result
+  // through handleDraftChange so the typing indicator still fires normally,
+  // then restores focus + cursor to the text input so the person can keep
+  // typing right where they left off.
+  function insertEmoji(emoji: string) {
+    const input = messageInputRef.current;
+    const start = input?.selectionStart ?? draft.length;
+    const end = input?.selectionEnd ?? draft.length;
+    const next = draft.slice(0, start) + emoji + draft.slice(end);
+    handleDraftChange(next);
+    requestAnimationFrame(() => {
+      input?.focus();
+      const cursor = start + emoji.length;
+      input?.setSelectionRange(cursor, cursor);
+    });
   }
 
   function lockAsDeleted() {
@@ -509,6 +554,7 @@ export default function ChatWindow() {
     setPartnerLastSeen(null);
     setPartnerDeleted(false);
     setMediaError("");
+    setShowEmojiPicker(false);
     hasScrolledOnceRef.current = false;
     loadMessages();
     loadPartnerStatus();
@@ -612,6 +658,7 @@ export default function ChatWindow() {
     const replyToId = replyingTo?.id;
     setDraft("");
     setReplyingTo(null);
+    setShowEmojiPicker(false);
     stopTypingNow();
     try {
       const data = await gql<{ sendMessage: MessageItem }>(SEND_MESSAGE_MUTATION, {
@@ -1139,7 +1186,48 @@ export default function ChatWindow() {
                 )}
               </button>
 
+              <div className="relative shrink-0">
+                <button
+                  ref={emojiButtonRef}
+                  type="button"
+                  onClick={() => setShowEmojiPicker((v) => !v)}
+                  disabled={isUploadingImage || isUploadingVoice}
+                  aria-label="Insert emoji"
+                  aria-expanded={showEmojiPicker}
+                  title="Insert emoji"
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-snow hover:text-whispr-coral disabled:opacity-50 dark:text-whispr-fog dark:hover:bg-whispr-onyx"
+                >
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+                    <circle cx="9" cy="10" r="1.1" fill="currentColor" />
+                    <circle cx="15" cy="10" r="1.1" fill="currentColor" />
+                    <path
+                      d="M8 14.5c1 1.3 2.4 2 4 2s3-.7 4-2"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+                {showEmojiPicker && (
+                  <div
+                    ref={emojiPickerRef}
+                    className="absolute bottom-full left-0 z-20 mb-2 overflow-hidden rounded-2xl shadow-lg"
+                  >
+                    <Picker
+                      data={data}
+                      onEmojiSelect={(emoji: { native: string }) => insertEmoji(emoji.native)}
+                      theme={theme}
+                      previewPosition="none"
+                      skinTonePosition="none"
+                      maxFrequentRows={1}
+                    />
+                  </div>
+                )}
+              </div>
+
               <input
+                ref={messageInputRef}
                 value={draft}
                 onChange={(e) => handleDraftChange(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
