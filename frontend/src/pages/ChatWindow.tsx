@@ -47,11 +47,66 @@ interface MessageItem {
 }
 
 const TYPING_STOP_DELAY_MS = 2000;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB — hard cap on what we'll even attempt to read
+const MAX_IMAGE_DIMENSION = 1600; // longest side, px, after compression
+const IMAGE_JPEG_QUALITY = 0.82;
 
 // Base URL of our own backend — used both for GraphQL/upload calls
 // elsewhere in the app and here for the download-proxy endpoint below.
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+// Resizes + recompresses a photo before it's uploaded — same idea as the
+// avatar cropper in ProfileSettings, but keeps the original aspect ratio
+// instead of forcing a square. This is the actual fix for "the skeleton
+// sits there forever": an uncompressed phone photo can be several MB, and
+// every person in the conversation has to download that full size just to
+// see the thumbnail. Shrinking it here, once, before it ever reaches S3,
+// means everyone's bubble finishes loading in a fraction of the time —
+// the skeleton itself was never the slow part, the multi-MB file was.
+function compressImageForUpload(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let { width, height } = img;
+      if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+        const scale = Math.min(MAX_IMAGE_DIMENSION / width, MAX_IMAGE_DIMENSION / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Canvas not supported."));
+        return;
+      }
+      // White backdrop first — JPEG has no alpha, so a transparent PNG
+      // would otherwise turn black.
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error("Could not process that image."))),
+        "image/jpeg",
+        IMAGE_JPEG_QUALITY
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not read that image."));
+    };
+
+    img.src = objectUrl;
+  });
+}
 
 function auraFor(_name: string) {
   return "linear-gradient(135deg, #A06CD5, #815AC0)";
@@ -108,6 +163,25 @@ function formatDuration(seconds: number | null) {
 function ChatImage({ url, onOpen }: { url: string; onOpen: () => void }) {
   const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [attempt, setAttempt] = useState(0);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  // The browser can finish loading an image (e.g. served straight from
+  // cache, which is exactly what happens on a page refresh — the signed
+  // URL was already fetched once) BEFORE React even attaches the onLoad
+  // listener below. In that case the "load" event already fired and is
+  // gone forever, so onLoad never runs and the skeleton would be stuck
+  // showing indefinitely — even though the image is already sitting in
+  // memory (which is why clicking it still opens the lightbox fine).
+  // `img.complete` tells us synchronously whether that already happened,
+  // so we check it once right after mount and for every url/attempt
+  // change, same pattern VoiceMessagePlayer uses with audio.readyState.
+  useEffect(() => {
+    const el = imgRef.current;
+    if (el && el.complete && el.naturalWidth > 0) {
+      setStatus("loaded");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, attempt]);
 
   function handleRetry(e: React.MouseEvent) {
     e.stopPropagation();
@@ -172,6 +246,7 @@ function ChatImage({ url, onOpen }: { url: string; onOpen: () => void }) {
         className={`block h-full w-full ${status === "error" ? "pointer-events-none" : ""}`}
       >
         <img
+          ref={imgRef}
           key={attempt}
           src={url}
           alt="Shared photo"
@@ -611,7 +686,12 @@ export default function ChatWindow() {
 
     setIsUploadingImage(true);
     try {
-      const { key } = await uploadMedia(file, "image", file.name);
+      // Skip compression for GIFs — drawing one to a <canvas> would
+      // flatten it down to a single static frame, killing the animation.
+      const isGif = file.type === "image/gif";
+      const toUpload: File | Blob = isGif ? file : await compressImageForUpload(file);
+      const filename = isGif ? file.name : file.name.replace(/\.[^.]+$/, "") + ".jpg";
+      const { key } = await uploadMedia(toUpload, "image", filename);
       await handleSendMedia("image", key);
     } catch (err) {
       setMediaError(err instanceof Error ? err.message : "Upload failed. Please try again.");
