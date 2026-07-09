@@ -1,9 +1,11 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+const PORT = parseInt(process.env.PORT || "5000", 10);
+
 export const ENV = {
   // Server
-  PORT: parseInt(process.env.PORT || "5000", 10),
+  PORT,
   NODE_ENV: process.env.NODE_ENV || "development",
 
   // MongoDB
@@ -31,4 +33,9 @@ export const ENV = {
   AWS_BUCKET_NAME: process.env.AWS_BUCKET_NAME || "",
   AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID || "",
   AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY || "",
+
+  // Base URL the browser uses to reach this backend directly — needed to
+  // build an absolute URL for the temporary local voice-message stream,
+  // since the frontend runs on a different origin.
+  PUBLIC_API_URL: process.env.PUBLIC_API_URL || `http://localhost:${PORT}`,
 };

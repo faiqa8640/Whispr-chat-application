@@ -237,5 +237,13 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     the sidebar can update presence dots / "last seen" text live.
     """
     userStatusChanged: UserStatus!
+
+
+    """
+    Emitted when a voice message that was playing from a temporary local
+    stream finishes uploading to S3, so the client can swap its audio
+    source to the permanent URL without a refresh.
+    """
+    messageEdited: Message!
   }
 `;

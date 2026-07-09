@@ -328,3 +328,19 @@ export const USER_STATUS_CHANGED_SUBSCRIPTION = /* GraphQL */ `
     }
   }
 `;
+
+
+// ─── Message edit subscription ────────────────────────────────────
+// Fires when a voice message that was streaming from a temporary local
+// URL finishes migrating to S3 — lets the client swap the <audio> source
+// to the permanent link live, without a refresh.
+export const MESSAGE_EDITED_SUBSCRIPTION = /* GraphQL */ `
+  subscription MessageEdited {
+    messageEdited {
+      id content type mediaUrl mediaDuration createdAt read deleted
+      sender { id name avatar isOnline lastSeen isDeleted}
+      receiver { id name avatar isOnline lastSeen isDeleted}
+      replyTo { id content type mediaUrl deleted sender { id name avatar } }
+    }
+  }
+`;

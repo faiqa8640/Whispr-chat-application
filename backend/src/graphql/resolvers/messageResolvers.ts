@@ -7,17 +7,26 @@ import type { IUser } from "../../models/User.js";
 import { pubsub, EVENTS } from "../pubsub.js";
 import { isUserOnline } from "../../utils/onlineStatus.js";
 import { getSignedMediaUrl, deleteMediaObject } from "../../utils/s3.js";
+import { buildLocalVoiceUrl, deleteVoiceFileLocally } from "../../utils/voiceLocalStore.js";
 
 export { pubsub };
 
 //This formatMessage function takes a raw MongoDB message document and converts it into the clean message object your GraphQL API sends to the frontend
-async function formatMessage(msg: any) {
+// Exported (was module-private before) so the REST voice-message route
+// (routes/voiceMessage.ts) can format the message it creates/edits the
+// exact same way this resolver file does everywhere else.
+export async function formatMessage(msg: any) {
   // Once unsent, or if there's no media key, there's nothing to sign.
   let mediaUrl: string | null = null;
   // check msg have a file stored in s3 and the msg is not deleted
   if (msg.mediaKey && !msg.deleted) {
     try {
-      mediaUrl = await getSignedMediaUrl(msg.mediaKey);//create a signed url
+      // Still uploading to S3 in the background (voice messages only)?
+      // Stream it from our own temporary local route instead of signing
+      // an S3 URL that doesn't have the object yet.
+      mediaUrl = msg.mediaPending
+        ? buildLocalVoiceUrl(msg.mediaKey)
+        : await getSignedMediaUrl(msg.mediaKey);//create a signed url
     } catch (err) {
       console.error("Failed to sign media URL:", err);
       mediaUrl = null;
@@ -30,7 +39,11 @@ async function formatMessage(msg: any) {
     if (msg.replyTo.mediaKey && !msg.replyTo.deleted) {
       try {
         // This creates a separate signed URL variable for the message being replied to.
-        replyMediaUrl = await getSignedMediaUrl(msg.replyTo.mediaKey);
+        // Same pending-check as above, in case the quoted message is
+        // itself a voice message still mid-upload.
+        replyMediaUrl = msg.replyTo.mediaPending
+          ? buildLocalVoiceUrl(msg.replyTo.mediaKey)
+          : await getSignedMediaUrl(msg.replyTo.mediaKey);
       } catch {
         replyMediaUrl = null;
       }
@@ -244,6 +257,11 @@ export const messageResolvers = {
       } else {// if  the type is voice or image then  if the mediakey is not presend then through the error
         if (!mediaKey) throw new Error("Media upload is required for this message type.");
       }
+      // NOTE: voice messages now normally go through the dedicated
+      // POST /api/voice-message REST route instead of this mutation (see
+      // routes/voiceMessage.ts), since that flow needs to save locally,
+      // publish immediately, then migrate to S3 in the background. This
+      // mutation path is kept as-is for text/image and as a fallback.
 
       const receiver = await User.findById(receiverId);// find the receiver by id
       if (!receiver) throw new Error("Recipient not found.");// if not exist then error
@@ -324,6 +342,11 @@ export const messageResolvers = {
      *  - If it's an image/voice message, the underlying S3 object is
      *    deleted first (best-effort — a failed S3 cleanup doesn't block
      *    the message itself from being removed, we just log it).
+     *    UPDATE: a voice message that's still mid-migration (mediaPending)
+     *    doesn't have an S3 object yet at all — its audio only exists on
+     *    this server's local scratch disk, so we delete that local file
+     *    instead. Anything not pending (images, or voice messages that
+     *    already finished uploading) still goes through the S3 delete.
      *  - The Message document itself is then hard-deleted from Mongo,
      *    not just scrubbed + flagged. There's no restore feature in this
      *    app, so keeping a permanently-scrubbed row (or an orphaned file
@@ -354,16 +377,23 @@ export const messageResolvers = {
         throw new Error("You can only unsend messages you sent.");
       }
 
-      // Clean up the S3 object BEFORE touching the DB row — if this were
-      // reversed and the DB delete succeeded but this failed, we'd have
-      // no record left pointing at the orphaned file to clean it up later.
+      // Clean up the underlying file BEFORE touching the DB row — if this
+      // were reversed and the DB delete succeeded but this failed, we'd
+      // have no record left pointing at the orphaned file to clean it up
+      // later.
       if (message.mediaKey) {
         try {
-          await deleteMediaObject(message.mediaKey);
+          if (message.mediaPending) {
+            // Still mid-migration — the only copy of this audio is the
+            // local scratch file, there's no S3 object to delete yet.
+            await deleteVoiceFileLocally(message.mediaKey);
+          } else {
+            await deleteMediaObject(message.mediaKey);
+          }
         } catch (err) {
-          // Best-effort — even if S3 cleanup fails, still proceed with
+          // Best-effort — even if cleanup fails, still proceed with
           // permanently removing the message itself below.
-          console.error("Failed to delete media from S3:", err);
+          console.error("Failed to delete media:", err);
         }
       }
 
@@ -479,6 +509,30 @@ export const messageResolvers = {
           return (
             payload.messageUnsent.sender.id === userId ||
             payload.messageUnsent.receiver.id === userId
+          );
+        }
+      ),
+    },
+
+    // __________MESSAGE EDITED (voice media migrated to S3)_______________
+    // Emitted when a voice message that was streaming from our local
+    // scratch file finishes its background S3 upload — lets clients swap
+    // the <audio> source to the permanent URL live, same filter pattern
+    // as messageUnsent above (delivered to both participants).
+    messageEdited: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterableIterator([EVENTS.MESSAGE_EDITED]),
+        (
+          payload: { messageEdited: any } | undefined,
+          _args: unknown,
+          context: { user: IUser | null } | undefined
+        ) => {
+          if (!payload || !context) return false;
+          const userId = context.user?._id?.toString();
+          if (!userId) return false;
+          return (
+            payload.messageEdited.sender.id === userId ||
+            payload.messageEdited.receiver.id === userId
           );
         }
       ),

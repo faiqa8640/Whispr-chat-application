@@ -7,6 +7,11 @@ export interface IMessage extends Document {
   type: "text" | "image" | "voice";
   mediaKey?: string;
   mediaDuration?: number; // seconds, voice notes only
+  // True while a voice message's audio is only sitting on this server's
+  // local disk, waiting on its background upload to S3. formatMessage()
+  // uses this to decide whether mediaUrl should point at our own
+  // temporary streaming route or a real S3 signed URL.
+  mediaPending?: boolean;
   read: boolean;
   deleted: boolean;
   replyTo?: mongoose.Types.ObjectId;
@@ -31,6 +36,7 @@ const MessageSchema = new Schema<IMessage>(
     type: { type: String, enum: ["text", "image", "voice"], default: "text" },
     mediaKey: { type: String },
     mediaDuration: { type: Number },
+    mediaPending: { type: Boolean, default: false },
     read: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },

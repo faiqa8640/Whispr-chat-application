@@ -9,16 +9,18 @@ import {
   SET_TYPING_MUTATION,
   USER_STATUS_QUERY,
 } from "../lib/mutations";
-import { uploadMedia } from "../lib/upload";
+import { uploadMedia, sendVoiceMessage } from "../lib/upload";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { useMessageSubscription } from "../lib/useMessageSubscription";
 import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
 import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
 import { useMessageUnsentSubscription } from "../lib/useMessageUnsentSubscription";
+import { useMessageEditedSubscription } from "../lib/useMessageEditedSubscription";
 import { useTypingSubscription } from "../lib/useTypingSubscription";
 import { useUserStatusSubscription } from "../lib/useUserStatusSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
+import VoiceMessagePlayer from "../components/chat/VoiceMessagePlayer";
 
 type MessageKind = "text" | "image" | "voice";
 
@@ -400,6 +402,21 @@ export default function ChatWindow() {
     );
   });
 
+  // Live media migration — when a voice message we can see finishes its
+  // background S3 upload, swap its mediaUrl to the permanent link.
+  // VoiceMessagePlayer picks up the new url via its own [url] effect and
+  // reloads the <audio> element in place, keeping playback position.
+  useMessageEditedSubscription(({ messageEdited }) => {
+    const isThisConversation =
+      (messageEdited.sender.id === userId && messageEdited.receiver.id === user?.id) ||
+      (messageEdited.receiver.id === userId && messageEdited.sender.id === user?.id);
+    if (!isThisConversation) return;
+
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageEdited.id ? { ...m, mediaUrl: messageEdited.mediaUrl } : m))
+    );
+  });
+
   function scrollToMessage(id: string) {
     const el = messageRefs.current[id];
     if (!el) return;
@@ -532,14 +549,39 @@ export default function ChatWindow() {
 
         const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
         if (blob.size === 0) return;
+        if (!userId || partnerDeleted) return;
+
+        const replyToId = replyingTo?.id;
+        stopTypingNow();
 
         setIsUploadingVoice(true);
         try {
           const ext = (recorder.mimeType || "audio/webm").includes("ogg") ? "ogg" : "webm";
-          const { key } = await uploadMedia(blob, "voice", `voice-${Date.now()}.${ext}`);
-          await handleSendMedia("voice", key, duration);
+          // One call does it all: the backend saves the file locally,
+          // creates + publishes the message immediately (so the receiver
+          // gets a playable bubble right away), and migrates it to S3 in
+          // the background — see useMessageEditedSubscription above for
+          // how the <audio> source gets swapped over once that finishes.
+          const message = await sendVoiceMessage({
+            file: blob,
+            filename: `voice-${Date.now()}.${ext}`,
+            receiverId: userId,
+            replyToId,
+            mediaDuration: duration,
+          });
+          setReplyingTo(null);
+          setMessages((prev) =>
+            prev.some((m) => m.id === message.id) ? prev : [...prev, message as MessageItem]
+          );
+          setPartnerName((prev) => prev || message.receiver.name);
+          setPartnerAvatar((prev) => prev ?? message.receiver.avatar);
         } catch (err) {
-          setMediaError(err instanceof Error ? err.message : "Could not send voice message.");
+          const msg = err instanceof Error ? err.message : "";
+          if (msg.toLowerCase().includes("no longer exists")) {
+            lockAsDeleted();
+          } else {
+            setMediaError(msg || "Could not send voice message.");
+          }
         } finally {
           setIsUploadingVoice(false);
         }
@@ -681,7 +723,7 @@ export default function ChatWindow() {
                         : "rounded-2xl rounded-bl-sm bg-white text-whispr-noir dark:bg-whispr-charcoal dark:text-whispr-ivory"
                     } ${highlightedId === m.id ? "ring-2 ring-offset-2 ring-whispr-coral" : ""} ${
                       m.type === "image" && !m.deleted ? "!p-1.5" : ""
-                    }`}
+                    } ${m.type === "voice" && !m.deleted ? "!py-2" : ""}`}
                   >
                     {m.replyTo && (
                       <button
@@ -734,14 +776,12 @@ export default function ChatWindow() {
                         />
                       </button>
                     ) : m.type === "voice" && m.mediaUrl ? (
-                      <div className="flex flex-col gap-1">
-                        <audio controls src={m.mediaUrl} className="h-9 w-[220px]" />
-                        {m.mediaDuration != null && (
-                          <span className={`font-body text-[10px] ${mine ? "text-white/70" : "text-whispr-mauve dark:text-whispr-fog"}`}>
-                            {formatDuration(m.mediaDuration)}
-                          </span>
-                        )}
-                      </div>
+                      <VoiceMessagePlayer
+                        url={m.mediaUrl}
+                        duration={m.mediaDuration}
+                        variant={mine ? "mine" : "theirs"}
+                        seed={m.id}
+                      />
                     ) : (
                       <span className="break-words">{m.content}</span>
                     )}
