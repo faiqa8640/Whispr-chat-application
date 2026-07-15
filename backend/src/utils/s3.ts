@@ -43,6 +43,7 @@ export function buildMediaKey(userId: string, kind: MediaKind, ext: string): str
   // if ext=JPG --> safeExt=".jpg"
   return `${APP_FOLDER}/${sub}/${userId}/${randomUUID()}${safeExt}`;
   // This builds the final S3 key.
+  // something like whispr/images/6873ab123/4c1f8d6b-8d24-4d75-8e5d-95e1b7d9f7f2.jpg
 }
 
 // This starts an async function that uploads a file to S3.
@@ -51,7 +52,7 @@ export async function uploadBufferToS3(params: {
   key: string;//The exact S3 key/path where the file should be stored.
   body: Buffer;//The actual file data in memory.
   // When you upload using Multer memory storage, uploaded files are usually available as file.buffer
-  contentType: string;
+  contentType: string;// what type of file it is it 
 }): Promise<void> {
   await s3.send(
     new PutObjectCommand({//upload the object to s3
@@ -61,7 +62,7 @@ export async function uploadBufferToS3(params: {
       ContentType: params.contentType,
     })
   );
-}
+} 
 
 // Bucket stays private; we hand out short-lived signed URLs to view media
 // instead of making objects public.

@@ -4,7 +4,7 @@ import { Readable } from "stream";
 import { verifyToken } from "../utils/token.js";
 import { ENV } from "../config/env.js";
 
-// we use it to avoid the brosers cors error
+// we use it(this file) to avoid the brosers cors error
 // without it the normal flow is:
 // Frontend browser → signed S3 URL → S3
 // with it -> proxy flow:
@@ -12,6 +12,12 @@ import { ENV } from "../config/env.js";
 
 // hence you can say that this file :
 // lets the frontend download an image through your own backend instead of downloading it directly from S3.
+
+
+
+// import { Readable } from "stream";=>
+//  node has smthing like streams => means Don't load the whole file into memory.
+// load the files in chucks .. like receive a small chucks => send them imdetelally and reveive next amd so on 
 
 
 // import { Readable } from "stream";->nodejs imported the node streams
@@ -37,11 +43,13 @@ router.get("/download", async (req, res) => {
     // the url is of the image to be downloaded
     if (!url) return res.status(400).json({ error: "Missing url." });//if no then the url is missing 
 
-    // Only allow proxying our own bucket's URLs — otherwise this becomes
-    // an open proxy anyone could point at arbitrary sites (SSRF risk).
     let parsed: URL;//create an object that create the parsed url
     try {
-      parsed = new URL(url);//new URL(url) checks whether the supplied string is a valid URL.
+      parsed = new URL(url);
+      // instead of treating it as a  plain text 
+      // node convert url into protocol, hostname , pathname , search
+      // as we need to inspect the host name below so therefor we used it
+      //new URL(url) checks whether the supplied string is a valid URL.
     } catch {
       return res.status(400).json({ error: "Invalid url." });// otherwise error
     }

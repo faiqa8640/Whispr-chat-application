@@ -1,7 +1,9 @@
-import dotenv from "dotenv";
-dotenv.config();
+import dotenv from "dotenv";//dotenv is to read the values stored inside your .env file.
+dotenv.config();//load the .env file
 
 const PORT = parseInt(process.env.PORT || "5000", 10);
+// parseInt ->it return the number -> like without it-> 5000 will be string -> after it is is a number
+// 10 means intercept this as a decimal base
 
 export const ENV = {
   // Server
@@ -38,4 +40,5 @@ export const ENV = {
   // build an absolute URL for the temporary local voice-message stream,
   // since the frontend runs on a different origin.
   PUBLIC_API_URL: process.env.PUBLIC_API_URL || `http://localhost:${PORT}`,
+  // This is the base URL that browsers use to reach your backend.
 };

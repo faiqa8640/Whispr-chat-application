@@ -16,7 +16,7 @@ const connectionCounts = new Map<string, number>();
 
 // isuseronline -> this check the active connections of the user 
 export function isUserOnline(userId: string): boolean {
-    // if the connectioncount of certain user is null or no then return 0 (no connection count)and
+    // if the connectioncount of certain user is null or no then return 0 (no connection count)=> false 
     // if there is atleast one or more active connection then i.e 1>0 -> return true(have connection openn) ,if 0>0 -> return false (have no connection open)
   return (connectionCounts.get(userId) ?? 0) > 0;
 }

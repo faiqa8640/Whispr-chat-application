@@ -1,16 +1,21 @@
 import nodemailer from "nodemailer";
+// // nodemailer is a Node.js library that allows your backend to send emails
 import { ENV } from "../config/env.js";
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
+const transporter = nodemailer.createTransport({//create a transported  it knows how to connect to the gmail
+  service: "gmail", //this nodemailer to use Gmail's SMTP server.
+  // SMTP -> Simple Mail Transfer Protocol => protocol use for sending the email
+  auth: {//tell gmail that who are you 
     user: ENV.EMAIL_USER,
     pass: ENV.EMAIL_PASS,   // Gmail App Password (not your regular password)
   },
 });
 
 // ─── Branded email wrapper (Whispr) ───────────────────────────────────────────
-function emailWrapper(content: string): string {
+// Instead of designing every email separately, you design a single template for  all the emails 
+function emailWrapper(content: string): string { // it return the string 
+  // content is the HTML that goes inside the email.
+  //  and ` is the javascript template literail
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;background:#FAF6FD;padding:40px 32px;border-radius:12px;">
       <div style="text-align:center;margin-bottom:32px;">
@@ -41,7 +46,7 @@ export async function sendOtpEmail(to: string, name: string, otp: string): Promi
     <p style="color:#9163CB;font-size:12px;line-height:1.6;margin:0;">If you didn't create a Whispr account, you can safely ignore this email.</p>
   `);
 
-  await transporter.sendMail({
+  await transporter.sendMail({// send the email
     from: `"Whispr" <${ENV.EMAIL_USER}>`,
     to,
     subject: "Your Whispr verification code",

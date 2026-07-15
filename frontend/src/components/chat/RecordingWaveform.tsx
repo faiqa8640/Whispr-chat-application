@@ -4,7 +4,7 @@ interface RecordingWaveformProps {
   stream: MediaStream | null;
 }
 
-const MAX_BARS = 35;
+const MAX_BARS = 32;
 const MIN_BAR_HEIGHT = 3;
 const MAX_BAR_HEIGHT = 24;
 const SAMPLE_INTERVAL_MS = 70; // how often a new bar is pushed in

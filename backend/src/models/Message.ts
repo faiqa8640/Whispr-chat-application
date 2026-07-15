@@ -11,7 +11,8 @@ export interface IMessage extends Document {
   // local disk, waiting on its background upload to S3. formatMessage()
   // uses this to decide whether mediaUrl should point at our own
   // temporary streaming route or a real S3 signed URL.
-  mediaPending?: boolean;
+  mediaPending?: boolean;// untill the media dont gdt uploaded on the s3 it says true if it get uploaded its turn false
+  // like if the media (voice) is on the local storage it is false but if  it upload on the s3 it shows upload
   read: boolean;
   deleted: boolean;
   replyTo?: mongoose.Types.ObjectId;
