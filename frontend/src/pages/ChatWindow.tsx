@@ -8,6 +8,7 @@ import {
   SEND_MESSAGE_MUTATION,
   MARK_CONVERSATION_READ_MUTATION,
   UNSEND_MESSAGE_MUTATION,
+  EDIT_MESSAGE_MUTATION,
   SET_TYPING_MUTATION,
   USER_STATUS_QUERY,
   TOGGLE_REACTION_MUTATION,
@@ -45,6 +46,10 @@ interface MessageItem {
   createdAt: string;
   read: boolean;
   deleted: boolean;
+  // NEW: WhatsApp/Instagram-style "(edited)" flag — true once the
+  // sender has edited this message's text. Defaults to false for
+  // messages fetched before this feature existed (see loadMessages()).
+  edited: boolean;
   sender: { id: string; name: string; avatar: string | null; isDeleted?: boolean };
   receiver: { id: string; name: string; avatar: string | null; isDeleted?: boolean };
   replyTo: {
@@ -422,6 +427,11 @@ export default function ChatWindow() {
   const [partnerLastSeen, setPartnerLastSeen] = useState<string | null>(null);
   const [partnerDeleted, setPartnerDeleted] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  // NEW: holds the message currently being edited (WhatsApp/Instagram-
+  // style "edit message" flow) — reuses the composer input, similar to
+  // how replyingTo reuses it for quoting. Mutually exclusive with
+  // replyingTo: starting an edit clears any active reply and vice versa.
+  const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
   // Holds the mediaUrl of whichever photo is currently open in the
@@ -574,10 +584,11 @@ export default function ChatWindow() {
     });
     // Older cached responses (before this feature existed) won't include
     // `reactions` — default to an empty array so the UI never has to
-    // special-case `undefined`.
+    // special-case `undefined`. Same idea for `edited`, defaulted false.
     const withReactionsDefaulted = data.messages.map((m) => ({
       ...m,
       reactions: m.reactions ?? [],
+      edited: m.edited ?? false,
     }));
     setMessages(withReactionsDefaulted);
     const withPartner = data.messages.find((m) => m.sender.id === userId || m.receiver.id === userId);
@@ -625,6 +636,8 @@ export default function ChatWindow() {
     setMediaError("");
     setShowEmojiPicker(false);
     setReactionPickerFor(null);
+    // NEW: drop out of any in-progress edit when switching conversations
+    setEditingMessage(null);
     hasScrolledOnceRef.current = false;
     loadMessages();
     loadPartnerStatus();
@@ -703,10 +716,14 @@ export default function ChatWindow() {
     );
   });
 
-  // Live media migration — when a voice message we can see finishes its
-  // background S3 upload, swap its mediaUrl to the permanent link.
-  // VoiceMessagePlayer picks up the new url via its own [url] effect and
-  // reloads the <audio> element in place, keeping playback position.
+  // Live media migration + live text edits — this event now covers two
+  // different underlying changes that both republish the full message:
+  // a voice message finishing its S3 migration (mediaUrl changes) and a
+  // text message being edited (content + edited change). Patching all
+  // three fields here keeps both cases in sync without needing to know
+  // which one just happened. VoiceMessagePlayer picks up the new url via
+  // its own [url] effect and reloads the <audio> element in place,
+  // keeping playback position.
   useMessageEditedSubscription(({ messageEdited }) => {
     const isThisConversation =
       (messageEdited.sender.id === userId && messageEdited.receiver.id === user?.id) ||
@@ -714,7 +731,11 @@ export default function ChatWindow() {
     if (!isThisConversation) return;
 
     setMessages((prev) =>
-      prev.map((m) => (m.id === messageEdited.id ? { ...m, mediaUrl: messageEdited.mediaUrl } : m))
+      prev.map((m) =>
+        m.id === messageEdited.id
+          ? { ...m, mediaUrl: messageEdited.mediaUrl, content: messageEdited.content, edited: messageEdited.edited }
+          : m
+      )
     );
   });
 
@@ -953,6 +974,12 @@ export default function ChatWindow() {
   }
 
   async function handleUnsend(messageId: string) {
+    // NEW: if the message being unsent is also the one currently being
+    // edited, drop out of edit mode — there's nothing left to save.
+    if (editingMessage?.id === messageId) {
+      setEditingMessage(null);
+      setDraft("");
+    }
     const previous = messages;
     setMessages((prev) =>
       prev.map((m) =>
@@ -964,6 +991,58 @@ export default function ChatWindow() {
     } catch (err) {
       console.error("Unsend failed:", err);
       setMessages(previous);
+    }
+  }
+
+  // ── Editing ───────────────────────────────────────────────────────────────
+  // NEW: WhatsApp/Instagram-style "edit message" flow. Starting an edit
+  // populates the composer with the message's current text (same idea
+  // as replyingTo reusing the composer for quoting) instead of opening a
+  // separate modal, and clears any active reply since you can't do both
+  // at once.
+  function handleStartEdit(message: MessageItem) {
+    if (message.type !== "text" || message.deleted) return;
+    setReplyingTo(null);
+    setEditingMessage(message);
+    setDraft(message.content);
+    setReactionPickerFor(null);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+  }
+
+  function handleCancelEdit() {
+    setEditingMessage(null);
+    setDraft("");
+  }
+
+  async function handleSaveEdit() {
+    if (!editingMessage || !draft.trim()) return;
+    const messageId = editingMessage.id;
+    const content = draft.trim();
+    // Optimistic update — flip the bubble immediately, same pattern as
+    // handleUnsend above, then reconcile with the server response.
+    const previous = messages;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, content, edited: true } : m))
+    );
+    setDraft("");
+    setEditingMessage(null);
+    stopTypingNow();
+    try {
+      const data = await gql<{ editMessage: MessageItem }>(EDIT_MESSAGE_MUTATION, {
+        messageId,
+        content,
+      });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, content: data.editMessage.content, edited: data.editMessage.edited }
+            : m
+        )
+      );
+    } catch (err) {
+      console.error("Edit failed:", err);
+      setMessages(previous);
+      setMediaError(err instanceof Error ? err.message : "Could not edit message.");
     }
   }
 
@@ -1150,6 +1229,8 @@ export default function ChatWindow() {
                         mine ? "text-white/75" : "text-whispr-mauve dark:text-whispr-fog"
                       }`}
                     >
+                      {/* NEW: WhatsApp/Instagram-style "Edited" label next to the timestamp */}
+                      {m.edited && !m.deleted && <span className="italic">Edited</span>}
                       {formatTime(m.createdAt)}
                       {mine && !m.deleted && <MessageTicks read={m.read} variant="bubble" />}
                     </span>
@@ -1202,12 +1283,13 @@ export default function ChatWindow() {
                     </div>
                   )}
 
-                  {/* Hover toolbar — react / reply / unsend grouped into a
-                      single small floating pill above the bubble, instead
-                      of three separately-positioned buttons. Anchored with
-                      a positive inset (right-1/left-1) so it can never be
-                      pushed past the edge of the viewport on narrow
-                      screens the way individually-offset buttons could. */}
+                  {/* Hover toolbar — react / reply / edit / unsend grouped
+                      into a single small floating pill above the bubble,
+                      instead of separately-positioned buttons. Anchored
+                      with a positive inset (right-1/left-1) so it can
+                      never be pushed past the edge of the viewport on
+                      narrow screens the way individually-offset buttons
+                      could. */}
                   {!m.deleted && (
                     <div
                       className={`absolute -top-3 z-10 hidden items-center gap-0.5 rounded-full border border-whispr-linen bg-white p-0.5 shadow-md group-hover:flex dark:border-whispr-ash dark:bg-whispr-charcoal ${
@@ -1238,7 +1320,7 @@ export default function ChatWindow() {
                       )}
                       {!partnerDeleted && (
                         <button
-                          onClick={() => setReplyingTo(m)}
+                          onClick={() => { setEditingMessage(null); setReplyingTo(m); }}
                           aria-label="Reply"
                           title="Reply"
                           className="flex h-6 w-6 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-snow hover:text-whispr-coral dark:text-whispr-fog dark:hover:bg-whispr-onyx"
@@ -1246,6 +1328,22 @@ export default function ChatWindow() {
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
                             <path d="M9 10L4 15L9 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                             <path d="M4 15H15A5 5 0 0020 10V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      )}
+                      {/* NEW: Edit — only for your own text messages (no
+                          caption to edit on images/voice notes in this
+                          app). */}
+                      {mine && m.type === "text" && (
+                        <button
+                          onClick={() => handleStartEdit(m)}
+                          aria-label="Edit message"
+                          title="Edit"
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-snow hover:text-whispr-coral dark:text-whispr-fog dark:hover:bg-whispr-onyx"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 20h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </button>
                       )}
@@ -1323,7 +1421,31 @@ export default function ChatWindow() {
         </div>
       ) : (
         <div className="border-t border-whispr-linen bg-white px-4 py-3.5 sm:px-6 dark:border-whispr-ash dark:bg-whispr-charcoal">
-          {replyingTo && (
+          {/* NEW: editing banner — WhatsApp/Instagram-style, shown instead
+              of the reply banner while editing a message (the two are
+              mutually exclusive; starting one clears the other). */}
+          {editingMessage && (
+            <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2 dark:bg-whispr-onyx">
+              <div className="min-w-0">
+                <p className="font-body text-xs font-semibold text-whispr-coral">Editing message</p>
+                <p className="truncate font-body text-xs text-whispr-mauve dark:text-whispr-fog">
+                  {editingMessage.content}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                aria-label="Cancel edit"
+                className="mt-0.5 shrink-0 text-whispr-mauve transition hover:text-whispr-noir dark:text-whispr-fog dark:hover:text-whispr-ivory"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {replyingTo && !editingMessage && (
             <div className="mb-2.5 flex items-start justify-between gap-3 rounded-lg border-l-4 border-whispr-coral bg-whispr-snow px-3 py-2 dark:bg-whispr-onyx">
               <div className="min-w-0">
                 <p className="font-body text-xs font-semibold text-whispr-coral">
@@ -1458,26 +1580,34 @@ export default function ChatWindow() {
                 ref={messageInputRef}
                 value={draft}
                 onChange={(e) => handleDraftChange(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                placeholder="Type a message…"
+                onKeyDown={(e) => e.key === "Enter" && (editingMessage ? handleSaveEdit() : handleSend())}
+                placeholder={editingMessage ? "Edit message…" : "Type a message…"}
                 disabled={isUploadingVoice}
                 className="flex-1 rounded-full border border-whispr-linen bg-whispr-snow px-4 py-3 font-body text-sm text-whispr-noir placeholder:text-whispr-mauve/70 focus:border-whispr-coral focus:outline-none focus:ring-2 focus:ring-whispr-coral/20 disabled:opacity-60 dark:border-whispr-ash dark:bg-whispr-onyx dark:text-whispr-ivory dark:placeholder:text-whispr-fog/70"
               />
 
               {draft.trim() ? (
                 <button
-                  onClick={handleSend}
+                  onClick={editingMessage ? handleSaveEdit : handleSend}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-whispr-coral to-whispr-crimson text-white shadow-sm transition hover:brightness-110"
-                  aria-label="Send message"
+                  aria-label={editingMessage ? "Save edited message" : "Send message"}
                 >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-                    <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  {editingMessage ? (
+                    // NEW: checkmark icon while editing — "save the edit"
+                    // instead of "send a new message".
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                      <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
                 </button>
               ) : (
                 <button
                   onClick={startRecording}
-                  disabled={isUploadingVoice || isUploadingImage}
+                  disabled={isUploadingVoice || isUploadingImage || !!editingMessage}
                   aria-label="Record a voice message"
                   title="Record a voice message"
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-whispr-coral to-whispr-crimson text-white shadow-sm transition hover:brightness-110 disabled:opacity-50"
@@ -1504,4 +1634,3 @@ export default function ChatWindow() {
     </div>
   );
 }
-

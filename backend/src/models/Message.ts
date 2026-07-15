@@ -23,6 +23,10 @@ export interface IMessage extends Document {
   // like if the media (voice) is on the local storage it is false but if  it upload on the s3 it shows upload
   read: boolean;
   deleted: boolean;
+  // NEW: true once the sender has edited this message's text after
+  // sending — WhatsApp/Instagram-style. Only ever set on text messages
+  // (images/voice notes have no caption to edit in this app).
+  edited: boolean;
   replyTo?: mongoose.Types.ObjectId;
   // Emoji reactions attached to this message — see IReaction above.
   reactions: IReaction[];
@@ -61,6 +65,9 @@ const MessageSchema = new Schema<IMessage>(
     mediaPending: { type: Boolean, default: false },
     read: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
+    // NEW: WhatsApp/Instagram-style "edited" flag — flipped true the
+    // first time editMessage() successfully changes this message's text.
+    edited: { type: Boolean, default: false },
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },
     reactions: { type: [ReactionSchema], default: [] },
   },

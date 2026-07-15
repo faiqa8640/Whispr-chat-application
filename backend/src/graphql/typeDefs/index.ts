@@ -75,6 +75,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     mediaDuration: Int
     read: Boolean!
     deleted: Boolean!
+    """True once this message's text has been edited after sending — WhatsApp/Instagram-style "(edited)" label."""
+    edited: Boolean!
     createdAt: DateTime!
     replyTo: ReplyPreview
     """Emoji reactions currently on this message."""
@@ -212,6 +214,15 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     """
     unsendMessage(messageId: ID!): Message!
 
+    """
+    Edit the text content of a message you sent — WhatsApp/Instagram-
+    style. Only works for text messages that haven't been unsent. Marks
+    the message edited: true so clients can show an "(edited)" label,
+    and pushes the update to both participants live via the same
+    messageEdited subscription used for voice-message S3 migration.
+    """
+    editMessage(messageId: ID!, content: String!): Message!
+
 
     """
     Notify the other participant that you started/stopped typing in a
@@ -259,9 +270,13 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
 
 
     """
-    Emitted when a voice message that was playing from a temporary local
-    stream finishes uploading to S3, so the client can swap its audio
-    source to the permanent URL without a refresh.
+    Emitted when a message's mutable fields change after it was first
+    sent — currently covers two cases: (1) a voice message that was
+    playing from a temporary local stream finishes uploading to S3, so
+    the client can swap its audio source to the permanent URL, and
+    (2) a text message gets edited (WhatsApp/Instagram-style), so both
+    participants' open chats can patch the bubble content + "(edited)"
+    label in place, live, without a refresh.
     """
     messageEdited: Message!
 

@@ -80,6 +80,9 @@ export async function formatMessage(msg: any) {
     mediaDuration: msg.mediaDuration ?? null,
     read: msg.read,
     deleted: !!msg.deleted,
+    // NEW: WhatsApp/Instagram-style "(edited)" flag — true once
+    // editMessage() has successfully changed this message's text.
+    edited: !!msg.edited,
     createdAt: msg.createdAt,
     replyTo,
     reactions,
@@ -426,6 +429,10 @@ export const messageResolvers = {
         mediaDuration: message.mediaDuration ?? null,
         read: message.read,
         deleted: true,
+        // NEW: keep the shape consistent with formatMessage() — an
+        // unsent message has nothing left to show an "(edited)" label
+        // for, so this is always false here regardless of prior state.
+        edited: false,
         createdAt: message.createdAt,
         replyTo: null,
         reactions: [], // nothing left to react to once it's unsent
@@ -436,6 +443,58 @@ export const messageResolvers = {
 
       pubsub.publish(EVENTS.MESSAGE_UNSENT, { messageUnsent: formatted });
       //publish the event
+      return formatted;
+    },
+
+    // __________editmessage__________________________________________________
+    /**
+     * Edits the text content of a message the caller sent — WhatsApp/
+     * Instagram-style. Rules:
+     *  - Only the original sender can edit their own message.
+     *  - Only text messages can be edited (images/voice notes have no
+     *    caption in this app, so there's nothing to edit on those).
+     *  - Can't edit a message that's already been unsent.
+     *  - The new content can't be empty.
+     * Marks `edited: true` so clients render the "(edited)" label next
+     * to the timestamp, and reuses the same MESSAGE_EDITED event /
+     * subscription that voice-message S3 migration already uses — that
+     * subscription already delivers the full updated message to both
+     * participants live, which is exactly what a text edit needs too.
+     */
+    editMessage: async (
+      _: unknown,
+      { messageId, content }: { messageId: string; content: string },
+      ctx: AuthContext
+    ) => {
+      const me = requireAuth(ctx);
+
+      if (!content || !content.trim()) throw new Error("Message cannot be empty.");
+
+      const message = await Message.findById(messageId);
+      if (!message) throw new Error("Message not found.");
+
+      if (message.sender.toString() !== me._id.toString()) {
+        throw new Error("You can only edit messages you sent.");
+      }
+      if (message.deleted) throw new Error("Can't edit a message that was unsent.");
+      if (message.type !== "text") throw new Error("Only text messages can be edited.");
+
+      message.content = content.trim();
+      message.edited = true;
+      await message.save();
+
+      const populated = await message.populate<{
+        sender: any;
+        receiver: any;
+        replyTo: any;
+        reactions: any;
+      }>(["sender", "receiver", { path: "replyTo", populate: "sender" }, "reactions.user"]);
+      const formatted = await formatMessage(populated);
+
+      // Same event/subscription voice-message migration uses — both
+      // participants' open chats patch this message in place live.
+      pubsub.publish(EVENTS.MESSAGE_EDITED, { messageEdited: formatted });
+
       return formatted;
     },
 
@@ -600,11 +659,12 @@ export const messageResolvers = {
       ),
     },
 
-    // __________MESSAGE EDITED (voice media migrated to S3)_______________
-    // Emitted when a voice message that was streaming from our local
-    // scratch file finishes its background S3 upload — lets clients swap
-    // the <audio> source to the permanent URL live, same filter pattern
-    // as messageUnsent above (delivered to both participants).
+    // __________MESSAGE EDITED (voice media migrated to S3, OR text edited)_______________
+    // Emitted (1) when a voice message that was streaming from our local
+    // scratch file finishes its background S3 upload, and (2) whenever a
+    // text message's content is edited — lets clients patch the message
+    // in place live, same filter pattern as messageUnsent above
+    // (delivered to both participants).
     messageEdited: {
       subscribe: withFilter(
         () => pubsub.asyncIterableIterator([EVENTS.MESSAGE_EDITED]),

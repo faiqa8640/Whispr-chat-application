@@ -173,7 +173,7 @@ export const CONVERSATIONS_QUERY = /* GraphQL */ `
 export const MESSAGES_QUERY = /* GraphQL */ `
   query Messages($withUserId: ID!, $limit: Int) {
     messages(withUserId: $withUserId, limit: $limit) {
-      id content type mediaUrl mediaDuration createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted edited
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
@@ -214,7 +214,7 @@ export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
       mediaDuration: $mediaDuration
       replyToId: $replyToId
     ) {
-      id content type mediaUrl mediaDuration createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted edited
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
@@ -240,6 +240,23 @@ export const UNSEND_MESSAGE_MUTATION = /* GraphQL */ `
   }
 `;
 
+// Edits the text content of a message you sent — WhatsApp/Instagram-
+// style. Returns the full updated message so the caller can patch local
+// state immediately without waiting on the messageEdited subscription
+// round trip (that subscription still keeps the *other* participant's
+// view, and any of our own other open tabs, in sync).
+export const EDIT_MESSAGE_MUTATION = /* GraphQL */ `
+  mutation EditMessage($messageId: ID!, $content: String!) {
+    editMessage(messageId: $messageId, content: $content) {
+      id content type mediaUrl mediaDuration createdAt read deleted edited
+      sender { id name avatar }
+      receiver { id name avatar }
+      replyTo { id content type mediaUrl deleted sender { id name avatar } }
+      reactions { emoji user { id name } }
+    }
+  }
+`;
+
 export const SET_TYPING_MUTATION = /* GraphQL */ `
   mutation SetTyping($receiverId: ID!, $isTyping: Boolean!) {
     setTyping(receiverId: $receiverId, isTyping: $isTyping)
@@ -251,7 +268,7 @@ export const SET_TYPING_MUTATION = /* GraphQL */ `
 export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageReceived {
     messageReceived {
-      id content type mediaUrl mediaDuration createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted edited
       sender { id name avatar isOnline lastSeen }
       receiver { id name avatar isOnline lastSeen }
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
@@ -338,14 +355,17 @@ export const USER_STATUS_CHANGED_SUBSCRIPTION = /* GraphQL */ `
 
 
 // ─── Message edit subscription ────────────────────────────────────
-// Fires when a voice message that was streaming from a temporary local
-// URL finishes migrating to S3 — lets the client swap the <audio> source
-// to the permanent link live, without a refresh.
+// Fires (1) when a voice message that was streaming from a temporary
+// local URL finishes migrating to S3 — lets the client swap the <audio>
+// source to the permanent link live — and (2) whenever a text message's
+// content is edited (WhatsApp/Instagram-style), so both participants'
+// clients can patch the bubble content + "(edited)" label live, without
+// a refresh.
 
 export const MESSAGE_EDITED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageEdited {
     messageEdited {
-      id content type mediaUrl mediaDuration createdAt read deleted
+      id content type mediaUrl mediaDuration createdAt read deleted edited
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }

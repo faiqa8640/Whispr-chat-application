@@ -38,6 +38,12 @@ export interface VoiceMessageResult {
   createdAt: string;
   read: boolean;
   deleted: boolean;
+  // NEW: formatMessage() on the backend now always includes this field
+  // (WhatsApp/Instagram-style "(edited)" flag) — voice messages have no
+  // caption to edit in this app, so it's always false in practice here,
+  // but the field must exist on this type or `message as MessageItem`
+  // casts in ChatWindow.tsx fail to type-check (MessageItem requires it).
+  edited: boolean;
   sender: {
     id: string;
     name: string;
