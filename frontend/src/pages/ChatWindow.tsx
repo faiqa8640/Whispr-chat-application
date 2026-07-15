@@ -10,6 +10,7 @@ import {
   UNSEND_MESSAGE_MUTATION,
   SET_TYPING_MUTATION,
   USER_STATUS_QUERY,
+  TOGGLE_REACTION_MUTATION,
 } from "../lib/mutations";
 import { uploadMedia, sendVoiceMessage } from "../lib/upload";
 import { useAuth } from "../context/AuthContext";
@@ -19,6 +20,7 @@ import { useReadReceiptSubscription } from "../lib/useReadReceiptSubscription";
 import { useUserUpdatedSubscription } from "../lib/useUserUpdatedSubscription";
 import { useMessageUnsentSubscription } from "../lib/useMessageUnsentSubscription";
 import { useMessageEditedSubscription } from "../lib/useMessageEditedSubscription";
+import { useMessageReactionSubscription } from "../lib/useMessageReactionSubscription";
 import { useTypingSubscription } from "../lib/useTypingSubscription";
 import { useUserStatusSubscription } from "../lib/useUserStatusSubscription";
 import MessageTicks from "../components/chat/MessageTicks";
@@ -26,6 +28,13 @@ import VoiceMessagePlayer from "../components/chat/VoiceMessagePlayer";
 import RecordingWaveform from "../components/chat/RecordingWaveform";
 
 type MessageKind = "text" | "image" | "voice";
+
+// A single emoji reaction on a message — mirrors the backend Reaction
+// type (see graphql/typeDefs). One reaction per user per message.
+interface MessageReaction {
+  emoji: string;
+  user: { id: string; name: string };
+}
 
 interface MessageItem {
   id: string;
@@ -46,12 +55,21 @@ interface MessageItem {
     deleted: boolean;
     sender: { id: string; name: string; avatar: string | null };
   } | null;
+  // Emoji reactions currently on this message — WhatsApp/Instagram-style.
+  // Defaults to [] for messages fetched before this feature existed.
+  reactions: MessageReaction[];
 }
 
 const TYPING_STOP_DELAY_MS = 2000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB — hard cap on what we'll even attempt to read
 const MAX_IMAGE_DIMENSION = 1600; // longest side, px, after compression
 const IMAGE_JPEG_QUALITY = 0.82;
+
+// The small, fixed set of quick-react emojis shown in the reaction picker
+// popover — same idea as WhatsApp/Instagram's long-press reaction bar.
+// Kept short and curated rather than a full picker, since reacting is
+// meant to be a single quick tap.
+const REACTION_EMOJIS = ["❤️", "😂", "😮", "😢", "🙏", "👍"];
 
 // Base URL of our own backend — used both for GraphQL/upload calls
 // elsewhere in the app and here for the download-proxy endpoint below.
@@ -151,6 +169,28 @@ function formatDuration(seconds: number | null) {
     .toString()
     .padStart(2, "0");
   return `${m}:${s}`;
+}
+
+// Groups a message's flat reaction list into one entry per distinct
+// emoji, with a count and whether the current user is among the
+// reactors — everything the reaction-pill UI needs to render and to know
+// whether tapping a pill should toggle the reaction off for "me".
+function groupReactions(reactions: MessageReaction[], myUserId?: string) {
+  const order: string[] = [];
+  const byEmoji = new Map<string, { emoji: string; count: number; mine: boolean }>();
+
+  for (const r of reactions) {
+    let entry = byEmoji.get(r.emoji);
+    if (!entry) {
+      entry = { emoji: r.emoji, count: 0, mine: false };
+      byEmoji.set(r.emoji, entry);
+      order.push(r.emoji);
+    }
+    entry.count += 1;
+    if (r.user.id === myUserId) entry.mine = true;
+  }
+
+  return order.map((emoji) => byEmoji.get(emoji)!);
 }
 
 // ── Image bubble w/ skeleton loader ─────────────────────────────────────────
@@ -410,11 +450,18 @@ export default function ChatWindow() {
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordCancelledRef = useRef(false);
 
-  // ── Emoji picker ─────────────────────────────────────────────────────────
+  // ── Emoji picker (composer) ─────────────────────────────────────────────
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Reaction picker (per-message quick-react popover) ───────────────────
+  // Holds the id of whichever message currently has its reaction popover
+  // open — only one can be open at a time, WhatsApp-style, so a single
+  // piece of state (rather than per-message state) is enough.
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  const reactionPickerRef = useRef<HTMLDivElement | null>(null);
 
   const isTypingActiveRef = useRef(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -476,6 +523,21 @@ export default function ChatWindow() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showEmojiPicker]);
 
+  // Close the per-message reaction popover on any click outside it. Since
+  // only one is ever rendered at a time (guarded by reactionPickerFor
+  // below), a single ref covers whichever one is currently open.
+  useEffect(() => {
+    if (!reactionPickerFor) return;
+    function handleClickOutsideReactionPicker(e: MouseEvent) {
+      const target = e.target as Node;
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(target)) {
+        setReactionPickerFor(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutsideReactionPicker);
+    return () => document.removeEventListener("mousedown", handleClickOutsideReactionPicker);
+  }, [reactionPickerFor]);
+
   // Inserts the picked emoji at the current cursor position (falls back to
   // appending at the end if we can't read a selection), routes the result
   // through handleDraftChange so the typing indicator still fires normally,
@@ -510,7 +572,14 @@ export default function ChatWindow() {
       withUserId: userId,
       limit: 100,
     });
-    setMessages(data.messages);
+    // Older cached responses (before this feature existed) won't include
+    // `reactions` — default to an empty array so the UI never has to
+    // special-case `undefined`.
+    const withReactionsDefaulted = data.messages.map((m) => ({
+      ...m,
+      reactions: m.reactions ?? [],
+    }));
+    setMessages(withReactionsDefaulted);
     const withPartner = data.messages.find((m) => m.sender.id === userId || m.receiver.id === userId);
     if (withPartner) {
       const partner = withPartner.sender.id === userId ? withPartner.sender : withPartner.receiver;
@@ -555,6 +624,7 @@ export default function ChatWindow() {
     setPartnerDeleted(false);
     setMediaError("");
     setShowEmojiPicker(false);
+    setReactionPickerFor(null);
     hasScrolledOnceRef.current = false;
     loadMessages();
     loadPartnerStatus();
@@ -583,7 +653,9 @@ export default function ChatWindow() {
       (msg.receiver.id === userId && msg.sender.id === user?.id);
 
     if (isThisConversation) {
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id) ? prev : [...prev, { ...msg, reactions: msg.reactions ?? [] }]
+      );
       if (msg.sender.id === userId) setPartnerTyping(false);
       if (msg.sender.id !== user?.id) {
         gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId }).catch(() => {});
@@ -625,7 +697,9 @@ export default function ChatWindow() {
     if (!isThisConversation) return;
 
     setMessages((prev) =>
-      prev.map((m) => (m.id === messageUnsent.id ? { ...m, deleted: true, content: "", mediaUrl: null } : m))
+      prev.map((m) =>
+        m.id === messageUnsent.id ? { ...m, deleted: true, content: "", mediaUrl: null, reactions: [] } : m
+      )
     );
   });
 
@@ -641,6 +715,23 @@ export default function ChatWindow() {
 
     setMessages((prev) =>
       prev.map((m) => (m.id === messageEdited.id ? { ...m, mediaUrl: messageEdited.mediaUrl } : m))
+    );
+  });
+
+  // Live reactions — whenever either participant adds/changes/removes a
+  // reaction on a message in this conversation, patch its reaction list
+  // in place so the pills update immediately on both ends, WhatsApp/
+  // Instagram-style, without waiting on a refetch.
+  useMessageReactionSubscription(({ messageReactionUpdated }) => {
+    const isThisConversation =
+      (messageReactionUpdated.sender.id === userId && messageReactionUpdated.receiver.id === user?.id) ||
+      (messageReactionUpdated.receiver.id === userId && messageReactionUpdated.sender.id === user?.id);
+    if (!isThisConversation) return;
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageReactionUpdated.id ? { ...m, reactions: messageReactionUpdated.reactions } : m
+      )
     );
   });
 
@@ -668,7 +759,9 @@ export default function ChatWindow() {
         replyToId,
       });
       setMessages((prev) =>
-        prev.some((m) => m.id === data.sendMessage.id) ? prev : [...prev, data.sendMessage]
+        prev.some((m) => m.id === data.sendMessage.id)
+          ? prev
+          : [...prev, { ...data.sendMessage, reactions: data.sendMessage.reactions ?? [] }]
       );
       setPartnerName((prev) => prev || data.sendMessage.receiver.name);
       setPartnerAvatar((prev) => prev ?? data.sendMessage.receiver.avatar);
@@ -696,7 +789,9 @@ export default function ChatWindow() {
         replyToId,
       });
       setMessages((prev) =>
-        prev.some((m) => m.id === data.sendMessage.id) ? prev : [...prev, data.sendMessage]
+        prev.some((m) => m.id === data.sendMessage.id)
+          ? prev
+          : [...prev, { ...data.sendMessage, reactions: data.sendMessage.reactions ?? [] }]
       );
       setPartnerName((prev) => prev || data.sendMessage.receiver.name);
       setPartnerAvatar((prev) => prev ?? data.sendMessage.receiver.avatar);
@@ -811,9 +906,17 @@ export default function ChatWindow() {
             replyToId,
             mediaDuration: duration,
           });
+          // setReplyingTo(null);
+          // setMessages((prev) =>
+          //   prev.some((m) => m.id === message.id)
+          //     ? prev
+          //     : [...prev, { ...(message as MessageItem), reactions: [] }]
+          // );
           setReplyingTo(null);
           setMessages((prev) =>
-            prev.some((m) => m.id === message.id) ? prev : [...prev, message as MessageItem]
+            prev.some((m) => m.id === message.id)
+              ? prev
+              : [...prev, { ...message, reactions: message.reactions ?? [] } as MessageItem]
           );
           setPartnerName((prev) => prev || message.receiver.name);
           setPartnerAvatar((prev) => prev ?? message.receiver.avatar);
@@ -852,13 +955,36 @@ export default function ChatWindow() {
   async function handleUnsend(messageId: string) {
     const previous = messages;
     setMessages((prev) =>
-      prev.map((m) => (m.id === messageId ? { ...m, deleted: true, content: "", mediaUrl: null } : m))
+      prev.map((m) =>
+        m.id === messageId ? { ...m, deleted: true, content: "", mediaUrl: null, reactions: [] } : m
+      )
     );
     try {
       await gql(UNSEND_MESSAGE_MUTATION, { messageId });
     } catch (err) {
       console.error("Unsend failed:", err);
       setMessages(previous);
+    }
+  }
+
+  // ── Reactions ─────────────────────────────────────────────────────────────
+  // Adds/changes/removes the current user's reaction on a message. The
+  // mutation returns the full updated message, so we patch local state
+  // straight from the response — the subscription above then keeps the
+  // *other* participant's view (and any of our own other open tabs) in
+  // sync without us waiting on it here.
+  async function handleToggleReaction(messageId: string, emoji: string) {
+    setReactionPickerFor(null);
+    try {
+      const data = await gql<{ toggleReaction: MessageItem }>(TOGGLE_REACTION_MUTATION, {
+        messageId,
+        emoji,
+      });
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, reactions: data.toggleReaction.reactions } : m))
+      );
+    } catch (err) {
+      console.error("Reaction failed:", err);
     }
   }
 
@@ -945,6 +1071,8 @@ export default function ChatWindow() {
           const day = formatDayLabel(m.createdAt);
           const showDayDivider = day !== lastDay;
           lastDay = day;
+          const groupedReactions = m.deleted ? [] : groupReactions(m.reactions, user?.id);
+          const hasReactions = groupedReactions.length > 0;
 
           return (
             <div key={m.id}>
@@ -955,7 +1083,11 @@ export default function ChatWindow() {
                   </span>
                 </div>
               )}
-              <div className={`flex ${mine ? "justify-end" : "justify-start"} ${startsGroup ? "mt-3" : "mt-0.5"}`}>
+              <div
+                className={`flex ${mine ? "justify-end" : "justify-start"} ${startsGroup ? "mt-3" : "mt-0.5"} ${
+                  hasReactions ? "pb-3" : ""
+                }`}
+              >
                 <div className="group relative max-w-[75%] sm:max-w-[65%]">
                   <div
                     ref={(el) => { messageRefs.current[m.id] = el; }}
@@ -1034,32 +1166,128 @@ export default function ChatWindow() {
                     }}
                   />
 
-                  {mine && !m.deleted && (
-                    <button
-                      onClick={() => handleUnsend(m.id)}
-                      aria-label="Unsend message"
-                      title="Unsend"
-                      className="absolute -top-2 -left-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-burgundy group-hover:flex dark:bg-whispr-charcoal dark:text-whispr-fog dark:hover:text-whispr-petal"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </button>
+                  {/* Reaction badge — a single cohesive pill (one border,
+                      one shadow) tucked into the bottom corner of the
+                      bubble, WhatsApp/Instagram-style. Each emoji inside
+                      is its own tap target — tapping toggles that emoji
+                      for the current user — but the group reads as one
+                      small badge rather than a row of separate chips.
+                      Anchored with a positive inset (right-1.5/left-1.5)
+                      so it always stays within the message column and
+                      never spills past the edge of the screen. */}
+                  {hasReactions && (
+                    <div className={`absolute -bottom-3 z-10 max-w-full ${mine ? "right-1.5" : "left-1.5"}`}>
+                      <div className="flex items-center gap-0.5 rounded-full border border-whispr-linen bg-white px-1 py-0.5 shadow-md dark:border-whispr-ash dark:bg-whispr-charcoal">
+                        {groupedReactions.map((r) => (
+                          <button
+                            key={r.emoji}
+                            type="button"
+                            onClick={() => handleToggleReaction(m.id, r.emoji)}
+                            aria-label={`React with ${r.emoji}`}
+                            className={`flex shrink-0 items-center gap-0.5 rounded-full px-1 py-0.5 font-body text-xs leading-none transition active:scale-90 ${
+                              r.mine
+                                ? "bg-whispr-petal/70 dark:bg-whispr-coral/20"
+                                : "hover:bg-whispr-snow dark:hover:bg-whispr-onyx"
+                            }`}
+                          >
+                            <span>{r.emoji}</span>
+                            {r.count > 1 && (
+                              <span className="font-body text-[10px] font-medium text-whispr-mauve dark:text-whispr-fog">
+                                {r.count}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                  {!m.deleted && !partnerDeleted && (
-                    <button
-                      onClick={() => setReplyingTo(m)}
-                      aria-label="Reply"
-                      title="Reply"
-                      className={`absolute -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-white text-whispr-mauve shadow-sm transition hover:text-whispr-coral group-hover:flex dark:bg-whispr-charcoal dark:text-whispr-fog ${
-                        mine ? "-right-2" : "-left-2"
+
+                  {/* Hover toolbar — react / reply / unsend grouped into a
+                      single small floating pill above the bubble, instead
+                      of three separately-positioned buttons. Anchored with
+                      a positive inset (right-1/left-1) so it can never be
+                      pushed past the edge of the viewport on narrow
+                      screens the way individually-offset buttons could. */}
+                  {!m.deleted && (
+                    <div
+                      className={`absolute -top-3 z-10 hidden items-center gap-0.5 rounded-full border border-whispr-linen bg-white p-0.5 shadow-md group-hover:flex dark:border-whispr-ash dark:bg-whispr-charcoal ${
+                        mine ? "right-1" : "left-1"
                       }`}
                     >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                        <path d="M9 10L4 15L9 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M4 15H15A5 5 0 0020 10V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
+                      {!partnerDeleted && (
+                        <button
+                          onClick={() => setReactionPickerFor((cur) => (cur === m.id ? null : m.id))}
+                          aria-label="React"
+                          title="React"
+                          className={`flex h-6 w-6 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-snow hover:text-whispr-coral dark:text-whispr-fog dark:hover:bg-whispr-onyx ${
+                            reactionPickerFor === m.id ? "bg-whispr-snow text-whispr-coral dark:bg-whispr-onyx" : ""
+                          }`}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+                            <circle cx="9" cy="10" r="1.1" fill="currentColor" />
+                            <circle cx="15" cy="10" r="1.1" fill="currentColor" />
+                            <path
+                              d="M8 14.5c1 1.3 2.4 2 4 2s3-.7 4-2"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                      {!partnerDeleted && (
+                        <button
+                          onClick={() => setReplyingTo(m)}
+                          aria-label="Reply"
+                          title="Reply"
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-snow hover:text-whispr-coral dark:text-whispr-fog dark:hover:bg-whispr-onyx"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                            <path d="M9 10L4 15L9 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M4 15H15A5 5 0 0020 10V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      )}
+                      {mine && (
+                        <button
+                          onClick={() => handleUnsend(m.id)}
+                          aria-label="Unsend message"
+                          title="Unsend"
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-whispr-mauve transition hover:bg-whispr-snow hover:text-whispr-burgundy dark:text-whispr-fog dark:hover:bg-whispr-onyx dark:hover:text-whispr-petal"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Quick-react popover — a small horizontal strip of the
+                      curated emoji set, WhatsApp long-press-style. Sits
+                      right above the hover toolbar with a matching inset
+                      and a short scale/fade-in, and clamps its own width
+                      so it can't overflow the viewport on narrow screens. */}
+                  {reactionPickerFor === m.id && (
+                    <div
+                      ref={reactionPickerRef}
+                      className={`absolute -top-14 z-20 flex w-max max-w-[88vw] items-center gap-0.5 rounded-full border border-whispr-linen bg-white px-1.5 py-1.5 shadow-lg transition duration-150 dark:border-whispr-ash dark:bg-whispr-charcoal ${
+                        mine ? "right-1" : "left-1"
+                      }`}
+                    >
+                      {REACTION_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleToggleReaction(m.id, emoji)}
+                          aria-label={`React with ${emoji}`}
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg transition hover:scale-125 hover:bg-whispr-snow dark:hover:bg-whispr-onyx"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1276,3 +1504,4 @@ export default function ChatWindow() {
     </div>
   );
 }
+

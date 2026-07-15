@@ -62,6 +62,9 @@ export interface VoiceMessageResult {
     deleted: boolean;
     sender: { id: string; name: string; avatar: string | null };
   } | null;
+  // Backend's formatMessage() now always includes this — empty on a
+  // fresh voice message, but keep the shape consistent with MessageItem.
+  reactions: { emoji: string; user: { id: string; name: string } }[];
 }
 
 /**

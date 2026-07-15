@@ -135,6 +135,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
       "sender",
       "receiver",
       { path: "replyTo", populate: "sender" },
+      "reactions.user",
     ]);
     const formatted = await formatMessage(populated);
 
@@ -169,7 +170,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
         sender: any;
         receiver: any;
         replyTo: any;
-      }>(["sender", "receiver", { path: "replyTo", populate: "sender" }]);
+      }>(["sender", "receiver", { path: "replyTo", populate: "sender" }, "reactions.user"]);
 
       if (repopulated) {
         const editedFormatted = await formatMessage(repopulated);//format the msg

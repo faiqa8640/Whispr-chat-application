@@ -56,6 +56,15 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     deleted: Boolean!
   }
 
+  """
+  A single emoji reaction on a message — WhatsApp/Instagram-style. One
+  reaction per user per message; the sender picks which emoji it is.
+  """
+  type Reaction {
+    emoji: String!
+    user: User!
+  }
+
   type Message {
     id: ID!
     sender: User!
@@ -68,6 +77,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     deleted: Boolean!
     createdAt: DateTime!
     replyTo: ReplyPreview
+    """Emoji reactions currently on this message."""
+    reactions: [Reaction!]!
   }
 
   type Conversation {
@@ -207,6 +218,14 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     conversation — Instagram/WhatsApp-style live typing indicator.
     """
     setTyping(receiverId: ID!, isTyping: Boolean!): Boolean!
+
+    """
+    Add, change, or remove your emoji reaction on a message —
+    WhatsApp/Instagram-style. Tapping the same emoji you already reacted
+    with removes it; tapping a different emoji swaps your reaction.
+    Returns the updated message with its full reactions list.
+    """
+    toggleReaction(messageId: ID!, emoji: String!): Message!
   }
 
   # ── SUBSCRIPTION ────────────────────────────────────────────────────────────────────
@@ -245,5 +264,12 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     source to the permanent URL without a refresh.
     """
     messageEdited: Message!
+
+    """
+    Emitted whenever a message's reactions change (someone reacted,
+    changed, or removed their reaction), so both participants' clients
+    can update the reaction pills live.
+    """
+    messageReactionUpdated: Message!
   }
 `;

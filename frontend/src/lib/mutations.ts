@@ -169,6 +169,7 @@ export const CONVERSATIONS_QUERY = /* GraphQL */ `
   }
 `;
 
+
 export const MESSAGES_QUERY = /* GraphQL */ `
   query Messages($withUserId: ID!, $limit: Int) {
     messages(withUserId: $withUserId, limit: $limit) {
@@ -176,6 +177,7 @@ export const MESSAGES_QUERY = /* GraphQL */ `
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
+      reactions { emoji user { id name } }
     }
   }
 `;
@@ -193,6 +195,7 @@ export const USER_STATUS_QUERY = /* GraphQL */ `
     }
   }
 `;
+
 
 export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
   mutation SendMessage(
@@ -215,6 +218,7 @@ export const SEND_MESSAGE_MUTATION = /* GraphQL */ `
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
+      reactions { emoji user { id name } }
     }
   }
 `;
@@ -242,6 +246,8 @@ export const SET_TYPING_MUTATION = /* GraphQL */ `
   }
 `;
 
+
+
 export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageReceived {
     messageReceived {
@@ -249,6 +255,7 @@ export const MESSAGE_RECEIVED_SUBSCRIPTION = /* GraphQL */ `
       sender { id name avatar isOnline lastSeen }
       receiver { id name avatar isOnline lastSeen }
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
+      reactions { emoji user { id name } }
     }
   }
 `;
@@ -334,6 +341,7 @@ export const USER_STATUS_CHANGED_SUBSCRIPTION = /* GraphQL */ `
 // Fires when a voice message that was streaming from a temporary local
 // URL finishes migrating to S3 — lets the client swap the <audio> source
 // to the permanent link live, without a refresh.
+
 export const MESSAGE_EDITED_SUBSCRIPTION = /* GraphQL */ `
   subscription MessageEdited {
     messageEdited {
@@ -341,6 +349,38 @@ export const MESSAGE_EDITED_SUBSCRIPTION = /* GraphQL */ `
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
+      reactions { emoji user { id name } }
+    }
+  }
+`;
+
+
+// ─── Reactions (emoji reactions on messages, WhatsApp/Instagram-style) ─────────
+
+// Adds, swaps, or removes (toggle-off) the caller's reaction on a message.
+// Returns the full updated message so the caller can patch its own state
+// immediately without waiting on the subscription round trip.
+export const TOGGLE_REACTION_MUTATION = /* GraphQL */ `
+  mutation ToggleReaction($messageId: ID!, $emoji: String!) {
+    toggleReaction(messageId: $messageId, emoji: $emoji) {
+      id content type mediaUrl mediaDuration createdAt read deleted
+      sender { id name avatar }
+      receiver { id name avatar }
+      reactions { emoji user { id name } }
+    }
+  }
+`;
+
+// Fires whenever a message's reactions change (added/changed/removed),
+// delivered to both participants — same pattern as MESSAGE_UNSENT /
+// MESSAGE_EDITED — so both sides' reaction pills stay in sync live.
+export const MESSAGE_REACTION_UPDATED_SUBSCRIPTION = /* GraphQL */ `
+  subscription MessageReactionUpdated {
+    messageReactionUpdated {
+      id
+      sender { id name avatar }
+      receiver { id name avatar }
+      reactions { emoji user { id name } }
     }
   }
 `;

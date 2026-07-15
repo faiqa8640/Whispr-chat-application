@@ -58,6 +58,18 @@ export async function formatMessage(msg: any) {
     };
   }
 
+  // Reactions — a message that's been unsent shouldn't show any (nothing
+  // left to react to), everything else renders whatever's on the doc.
+  // msg.reactions entries are subdocuments with a populated `user`.
+  const reactions = msg.deleted
+    ? []
+    : (msg.reactions || [])
+        .filter((r: any) => r.user) // guard against a reactor whose user doc vanished
+        .map((r: any) => ({
+          emoji: r.emoji,
+          user: formatUser(r.user),
+        }));
+
   return {
     id: msg._id.toString(),
     sender: formatUser(msg.sender),
@@ -70,6 +82,7 @@ export async function formatMessage(msg: any) {
     deleted: !!msg.deleted,
     createdAt: msg.createdAt,
     replyTo,
+    reactions,
   };
 }
 
@@ -140,6 +153,8 @@ export const messageResolvers = {
           // This is a nested populate
           //first populate the reply to msg -> the older message and in that mmsg the sender is still the refernece id so we populate the refernce id then 
           { path: "replyTo", populate: { path: "sender" } },
+          // populate whoever reacted so formatMessage can render their name/avatar
+          { path: "reactions.user" },
         ]);
       }
 
@@ -191,7 +206,8 @@ export const messageResolvers = {
         .limit(limit)// apply the limit to the messsages
         .populate("sender")// populate the sendeer and receiver and replyto
         .populate("receiver")
-        .populate({ path: "replyTo", populate: { path: "sender" } });
+        .populate({ path: "replyTo", populate: { path: "sender" } })
+        .populate("reactions.user"); // who reacted with what
         // after this the things is that the message are in the order
         // oldest message first 
         // i.e zain ->10:40 and then zain->10:30
@@ -296,11 +312,12 @@ export const messageResolvers = {
         replyTo,
       });
 
-      const populated = await message.populate<{ sender: any; receiver: any; replyTo: any }>([
+      const populated = await message.populate<{ sender: any; receiver: any; replyTo: any; reactions: any }>([
         // populating the message
         "sender",
         "receiver",
         { path: "replyTo", populate: "sender" },
+        "reactions.user", // empty on a fresh message, but keep the shape consistent
       ]);
       const formatted = await formatMessage(populated);//formatting the message 
 
@@ -411,6 +428,7 @@ export const messageResolvers = {
         deleted: true,
         createdAt: message.createdAt,
         replyTo: null,
+        reactions: [], // nothing left to react to once it's unsent
       };
 
       // Permanently remove the message — hard delete, not soft delete.
@@ -432,6 +450,74 @@ export const messageResolvers = {
         typingStatus: { userId: me._id.toString(), receiverId, isTyping },
       });
       return true;
+    },
+
+    // __________togglereaction__________________________________________________
+    /**
+     * Add, change, or remove the caller's emoji reaction on a message —
+     * WhatsApp/Instagram-style. Each user can only have ONE reaction on a
+     * given message at a time:
+     *  - No existing reaction from this user  -> add one with this emoji.
+     *  - Existing reaction, SAME emoji tapped -> remove it (toggle off).
+     *  - Existing reaction, DIFFERENT emoji   -> swap to the new emoji.
+     * Only the two participants of the conversation (sender/receiver) can
+     * react — same access rule as everything else in this conversation.
+     * Publishes MESSAGE_REACTION_UPDATED so both participants' open chats
+     * update the reaction pills live, same delivery pattern as
+     * messageUnsent/messageEdited above.
+     */
+    toggleReaction: async (
+      _: unknown,
+      { messageId, emoji }: { messageId: string; emoji: string },
+      ctx: AuthContext
+    ) => {
+      const me = requireAuth(ctx);
+      const myId = me._id.toString();
+
+      if (!emoji || !emoji.trim()) throw new Error("An emoji is required to react.");
+
+      const message = await Message.findById(messageId);
+      if (!message) throw new Error("Message not found.");
+      if (message.deleted) throw new Error("Can't react to a message that was unsent.");
+
+      // Only the two people in this conversation can react to it.
+      if (
+        message.sender.toString() !== myId &&
+        message.receiver.toString() !== myId
+      ) {
+        throw new Error("You can't react to this message.");
+      }
+
+      const existingIndex = message.reactions.findIndex(
+        (r) => r.user.toString() === myId
+      );
+
+      if (existingIndex !== -1 && message.reactions[existingIndex].emoji === emoji) {
+        // Tapped the same emoji they already reacted with — remove it.
+        message.reactions.splice(existingIndex, 1);
+      } else if (existingIndex !== -1) {
+        // Reacted before with a different emoji — swap it over.
+        message.reactions[existingIndex].emoji = emoji;
+      } else {
+        // First reaction from this user on this message.
+        message.reactions.push({ user: me._id, emoji });
+      }
+
+      await message.save();
+
+      const populated = await message.populate<{
+        sender: any;
+        receiver: any;
+        replyTo: any;
+        reactions: any;
+      }>(["sender", "receiver", { path: "replyTo", populate: "sender" }, "reactions.user"]);
+      const formatted = await formatMessage(populated);
+
+      pubsub.publish(EVENTS.MESSAGE_REACTION_UPDATED, {
+        messageReactionUpdated: formatted,
+      });
+
+      return formatted;
     },
   },
 
@@ -571,6 +657,29 @@ export const messageResolvers = {
         ) => {
           if (!payload || !context?.user) return false;
           return payload.userStatusChanged.userId !== context.user._id.toString();
+        }
+      ),
+    },
+
+    // __________MESSAGE REACTION UPDATED__________________________________________________
+    // Delivered to both participants (same pattern as messageUnsent /
+    // messageEdited) so reaction pills stay in sync live on both ends,
+    // regardless of who added/changed/removed the reaction.
+    messageReactionUpdated: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterableIterator([EVENTS.MESSAGE_REACTION_UPDATED]),
+        (
+          payload: { messageReactionUpdated: any } | undefined,
+          _args: unknown,
+          context: { user: IUser | null } | undefined
+        ) => {
+          if (!payload || !context) return false;
+          const userId = context.user?._id?.toString();
+          if (!userId) return false;
+          return (
+            payload.messageReactionUpdated.sender.id === userId ||
+            payload.messageReactionUpdated.receiver.id === userId
+          );
         }
       ),
     },

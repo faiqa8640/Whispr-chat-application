@@ -1,5 +1,13 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
+// A single emoji reaction from a single user on a message — WhatsApp/
+// Instagram-style: one reaction per user per message. Tapping the same
+// emoji again removes it, tapping a different emoji swaps it.
+export interface IReaction {
+  user: mongoose.Types.ObjectId;
+  emoji: string;
+}
+
 export interface IMessage extends Document {
   sender: mongoose.Types.ObjectId;
   receiver: mongoose.Types.ObjectId;
@@ -16,9 +24,22 @@ export interface IMessage extends Document {
   read: boolean;
   deleted: boolean;
   replyTo?: mongoose.Types.ObjectId;
+  // Emoji reactions attached to this message — see IReaction above.
+  reactions: IReaction[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+// Subdocument schema for a single reaction. _id: false because we don't
+// need to reference individual reactions directly — we look them up by
+// user id when toggling.
+const ReactionSchema = new Schema<IReaction>(
+  {
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    emoji: { type: String, required: true },
+  },
+  { _id: false }
+);
 
 const MessageSchema = new Schema<IMessage>(
   {
@@ -41,6 +62,7 @@ const MessageSchema = new Schema<IMessage>(
     read: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },
+    reactions: { type: [ReactionSchema], default: [] },
   },
   { timestamps: true }
 );
