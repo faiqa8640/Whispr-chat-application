@@ -1,5 +1,6 @@
 import { withFilter } from "graphql-subscriptions";
 import Message from "../../models/Message.js";
+import { MessageType } from "../../models/Message.js"; // NEW: enum for message.type, see Message.ts
 import User from "../../models/User.js";
 import { AuthContext, requireAuth } from "../../middleware/authContext.js";
 import { formatUser } from "./authResolvers.js";
@@ -52,7 +53,7 @@ export async function formatMessage(msg: any) {
       id: msg.replyTo._id.toString(),
       sender: formatUser(msg.replyTo.sender),
       content: msg.replyTo.deleted ? "" : msg.replyTo.content,
-      type: msg.replyTo.type || "text",
+      type: msg.replyTo.type || MessageType.TEXT,
       mediaUrl: replyMediaUrl,
       deleted: !!msg.replyTo.deleted,
     };
@@ -64,9 +65,9 @@ export async function formatMessage(msg: any) {
   const reactions = msg.deleted
     ? []
     : (msg.reactions || [])
-        .filter((r: any) => r.user) // guard against a reactor whose user doc vanished
-        .map((r: any) => ({
-          emoji: r.emoji,
+        .filter((r: any) => r.user) // Remove reactions whose user no longer exists.
+        .map((r: any) => ({//Convert each reaction into a simpler object.
+          emoji: r.emoji,//store the emoji
           user: formatUser(r.user),
         }));
 
@@ -75,14 +76,14 @@ export async function formatMessage(msg: any) {
     sender: formatUser(msg.sender),
     receiver: formatUser(msg.receiver),
     content: msg.deleted ? "" : msg.content,
-    type: msg.type || "text",
+    type: msg.type || MessageType.TEXT,
     mediaUrl,
     mediaDuration: msg.mediaDuration ?? null,
     read: msg.read,
     deleted: !!msg.deleted,
     // NEW: WhatsApp/Instagram-style "(edited)" flag — true once
     // editMessage() has successfully changed this message's text.
-    edited: !!msg.edited,
+    edited: !!msg.edited,//!!->converts any value into a boolean (true or false).
     createdAt: msg.createdAt,
     replyTo,
     reactions,
@@ -251,14 +252,19 @@ export const messageResolvers = {
       {
         receiverId,
         content,
-        type = "text",
+        // NEW: type now uses the MessageType enum instead of a bare
+        // "text" | "image" | "voice" string-literal union — see the
+        // MessageType comment block in Message.ts for why. Defaulting to
+        // MessageType.TEXT keeps the exact same runtime behavior as
+        // before ("text" as the default).
+        type = MessageType.TEXT,
         mediaKey,
         mediaDuration,
         replyToId,
       }: {
         receiverId: string;
         content?: string;
-        type?: "text" | "image" | "voice";
+        type?: MessageType;
         mediaKey?: string; // is the key if the type is the image or the voice 
         mediaDuration?: number;// and is only  if the type is the voice 
         replyToId?: string;
@@ -271,9 +277,9 @@ export const messageResolvers = {
       if (receiverId === me._id.toString()) throw new Error("You can't message yourself."); 
 
       // if the type is text
-      if (type === "text") {// cant be empty
+      if (type === MessageType.TEXT) {// cant be empty
         if (!content || !content.trim()) throw new Error("Message cannot be empty.");
-      } else {// if  the type is voice or image then  if the mediakey is not presend then through the error
+      } else {// if  the type is voice or image (or, later, any other non-text type) then  if the mediakey is not presend then through the error
         if (!mediaKey) throw new Error("Media upload is required for this message type.");
       }
       // NOTE: voice messages now normally go through the dedicated
@@ -308,7 +314,7 @@ export const messageResolvers = {
       const message = await Message.create({//creating the  message
         sender: me._id,
         receiver: receiverId,
-        content: type === "text" ? content!.trim() : "",
+        content: type === MessageType.TEXT ? content!.trim() : "",
         type,
         mediaKey,
         mediaDuration,
@@ -424,7 +430,7 @@ export const messageResolvers = {
         sender: formatUser(message.sender),
         receiver: formatUser(message.receiver),
         content: "",
-        type: message.type || "text",
+        type: message.type || MessageType.TEXT,
         mediaUrl: null,
         mediaDuration: message.mediaDuration ?? null,
         read: message.read,
@@ -477,7 +483,7 @@ export const messageResolvers = {
         throw new Error("You can only edit messages you sent.");
       }
       if (message.deleted) throw new Error("Can't edit a message that was unsent.");
-      if (message.type !== "text") throw new Error("Only text messages can be edited.");
+      if (message.type !== MessageType.TEXT) throw new Error("Only text messages can be edited.");
 
       message.content = content.trim();
       message.edited = true;
@@ -547,18 +553,24 @@ export const messageResolvers = {
         throw new Error("You can't react to this message.");
       }
 
-      const existingIndex = message.reactions.findIndex(
-        (r) => r.user.toString() === myId
+      const existingIndex = message.reactions.findIndex(//Searches for the current user's reaction.
+        (r) => r.user.toString() === myId//Compares each reaction's user ID with the logged-in user's ID.
+        //Stores the index of the user's reaction.
       );
 
       if (existingIndex !== -1 && message.reactions[existingIndex].emoji === emoji) {
+        //existingIndex !== -1  => if found one
+        //Checks if the user already reacted with the same emoji.
         // Tapped the same emoji they already reacted with — remove it.
-        message.reactions.splice(existingIndex, 1);
-      } else if (existingIndex !== -1) {
+        message.reactions.splice(existingIndex, 1);//Removes that reaction.
+      } else if (existingIndex !== -1) {//Checks if the user reacted before, but with a different emoji.
         // Reacted before with a different emoji — swap it over.
+        //Changes the old emoji to the new one.
         message.reactions[existingIndex].emoji = emoji;
       } else {
         // First reaction from this user on this message.
+        //Adds a new reaction.
+        //Saves the user's ID.
         message.reactions.push({ user: me._id, emoji });
       }
 
@@ -635,6 +647,7 @@ export const messageResolvers = {
         ) => {
           if (!payload || !context?.user) return false;
           return payload.userUpdated.id !== context.user._id.toString();
+          // The updated user is someone else. => as updated profile will be visible to other except me
         }
       ),
     },

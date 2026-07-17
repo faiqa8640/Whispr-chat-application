@@ -1,10 +1,31 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
+//// schema => it is like a blue print 
+// document => mongodb store the data as document 
+// model => is used to perform the operations 
 
-// A single emoji reaction from a single user on a message — WhatsApp/
-// Instagram-style: one reaction per user per message. Tapping the same
-// emoji again removes it, tapping a different emoji swaps it.
+
+//----------------------------------
+//INTERFACE -> FOR TYPESCRIPT UNDERSTANDING->WHICH PROPERTIES AND METHODS SHOULD THE USER HAVE?
+//SCHEMA -> HOW A USER SHOULD BE STORED IN THE MONGODB 
+// MODEL->IT IS THE  KIND OF WORKER THAT STORE THE USER IN THE MONGODB AND PERFORM THE OPERATIONS
+// I.E DELETE, FIND, ADD ETC => CAN ONLY DO IT WITH THE USER 
+// USIND MODEL THE CODE CAN ACTUALLY USE THE DB
+//----------------------------------
+
+
+// ── Enums ──────────────────────────
+export enum MessageType {
+  TEXT = "text",
+  IMAGE = "image",
+  VOICE = "voice",
+}
+
+
+//-----------------------------------
+// INTERFACE->TYEPSCRIPT BLUEPRINT
+// ----------------------------------
 export interface IReaction {
-  user: mongoose.Types.ObjectId;
+  user: mongoose.Types.ObjectId; // the user id
   emoji: string;
 }
 
@@ -12,68 +33,82 @@ export interface IMessage extends Document {
   sender: mongoose.Types.ObjectId;
   receiver: mongoose.Types.ObjectId;
   content: string;
-  type: "text" | "image" | "voice";
-  mediaKey?: string;
-  mediaDuration?: number; // seconds, voice notes only
-  // True while a voice message's audio is only sitting on this server's
-  // local disk, waiting on its background upload to S3. formatMessage()
-  // uses this to decide whether mediaUrl should point at our own
-  // temporary streaming route or a real S3 signed URL.
-  mediaPending?: boolean;// untill the media dont gdt uploaded on the s3 it says true if it get uploaded its turn false
-  // like if the media (voice) is on the local storage it is false but if  it upload on the s3 it shows upload
+  type: MessageType;
+  mediaKey?: string;// the key after sorted to the s3 
+  mediaDuration?: number; 
+  mediaPending?: boolean;//tells that has the media uploaded or is pending 
   read: boolean;
   deleted: boolean;
-  // NEW: true once the sender has edited this message's text after
-  // sending — WhatsApp/Instagram-style. Only ever set on text messages
-  // (images/voice notes have no caption to edit in this app).
   edited: boolean;
   replyTo?: mongoose.Types.ObjectId;
-  // Emoji reactions attached to this message — see IReaction above.
-  reactions: IReaction[];
+  reactions: IReaction[];//we are using the array coz one message could have multiples reactions
   createdAt: Date;
   updatedAt: Date;
 }
 
-// Subdocument schema for a single reaction. _id: false because we don't
-// need to reference individual reactions directly — we look them up by
-// user id when toggling.
+
+//--------------------------------
+// SCHEMAS-> MONGODB BLUEPRINT 
+//--------------------------------
+
+// REACTION SCHEMA 
+// -------------------
+//const ReactionSchema = new Schema<IReaction>  means 
+// create a mongodb schema using the shap defined in the IReaction 
 const ReactionSchema = new Schema<IReaction>(
   {
+    //type: Schema.Types.ObjectId => means store another document id here 
+    // objectid => each document have the _id so we store it here 
+    // ref: "User" => this tells that the object id points to the user model
     user: { type: Schema.Types.ObjectId, ref: "User", required: true },
     emoji: { type: String, required: true },
   },
   { _id: false }
 );
 
+
+// MESSAGE  SCHEMA 
+// -------------------
+// Create a new MongoDB schema that follows the IMessage interface.
+
 const MessageSchema = new Schema<IMessage>(
   {
     sender: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    // index => make a shortcut for this feild => now the things is that the search become easier
     receiver: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    content: {
+    content: {// store the text messages 
       type: String,
-      // Only required for text messages that haven't been unsent.
+      // the message should or should not have a content depens on the message 
+      //like if text msg => content required  but if the msg is voice or image or is deleted -> then no content requried
       required: function (this: IMessage) {
-        return !this.deleted && this.type === "text";
+        return !this.deleted && this.type === MessageType.TEXT;
       },
-      trim: true,
-      maxlength: 5000,
+      trim: true, //remove spaces
+      maxlength: 5000, //means max character of the message 
       default: "",
     },
-    type: { type: String, enum: ["text", "image", "voice"], default: "text" },
+    // enum: Object.values(MessageType) reads straight off the enum above —
+    // add a new MessageType member later and it's automatically a valid
+    // value here too, no separate array to keep in sync.
+    type: { type: String, enum: Object.values(MessageType), default: MessageType.TEXT },
     mediaKey: { type: String },
     mediaDuration: { type: Number },
     mediaPending: { type: Boolean, default: false },
     read: { type: Boolean, default: false },
     deleted: { type: Boolean, default: false },
-    // NEW: WhatsApp/Instagram-style "edited" flag — flipped true the
-    // first time editMessage() successfully changes this message's text.
     edited: { type: Boolean, default: false },
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },
-    reactions: { type: [ReactionSchema], default: [] },
+    reactions: { type: [ReactionSchema], default: [] },// an  array of reaction schema
   },
   { timestamps: true }
 );
 
+//using the index => to make the search fast 
+//An index is a shortcut that helps MongoDB find data quickly
+// we are using the compound index here
+// sender : 1=> in acending order 
+// receiver :1 => in ascending order 
+// created at descending  order
 MessageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
 
 const Message: Model<IMessage> = mongoose.model<IMessage>("Message", MessageSchema);

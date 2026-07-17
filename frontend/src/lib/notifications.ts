@@ -18,14 +18,14 @@ const NOTIFICATIONS_PREF_KEY = "whispr:notificationsEnabled";
 
 // This function checks whether the user enabled notifications in your Profile settings.
 export function isNotificationsEnabledByUser(): boolean {
-  // If this code runs outside the browser, return true.
+  // If this code runs outside the browser(such as on server), return true.
   // Why true? Because the default app preference is “notifications enabled.”
   if (typeof window === "undefined") return true;
   try {
     // This reads the saved setting. -> true/false/null
     const stored = window.localStorage.getItem(NOTIFICATIONS_PREF_KEY);
     return stored === null ? true : stored === "true";
-    // if stored=null -> return true
+    // if stored=null -> return true(notifications are enabled)
   } catch {
     // If reading localStorage fails, treat notifications as enabled by default.
     return true;
@@ -75,12 +75,24 @@ export function shouldNotify(partnerId: string, activeId?: string): boolean {
   // off in Profile settings, nothing below matters.
   if (!isNotificationsEnabledByUser()) return false;
 
+
+  // ilookingatthischat become true only if:
+  // ->the incoming messages are from the currently open chat
+  // means that zain chat is currently open and he is sending me the notification
+  // partnerid=zain(sending the msg) and activid=zain(chatopen) so zain ===zain   
+  // ->the browser tab is visible 
+  // -> the browser tab is focused 
+
+
   const isLookingAtThisChat =
   // This checks whether the user is actively looking at the exact conversation where the message arrived.
     partnerId === activeId &&//is the ID of the person who sent the incoming message.
     typeof document !== "undefined" &&//The code is running in a browser where document exists.
+    // if running in the browser then return true else return false
     document.visibilityState === "visible" &&//The browser tab is visible, not hidden in the background.
+    // means browser tab is open so return true else false 
     document.hasFocus();//The browser window is actively focused.
+    // means you are using chrome => return true  if using vs code return false 
 
   return !isLookingAtThisChat;// if true -> see notification
   //  if false -> No notification is shown because the user can already see the message in the open chat. 
@@ -89,8 +101,8 @@ export function shouldNotify(partnerId: string, activeId?: string): boolean {
 //This creates a TypeScript shape for the object passed into showMessageNotification.
 interface ShowMessageNotificationOptions {
   /** Used as both the notification title and to group repeats from the same sender. */
-  partnerId: string;
-  senderName: string;
+  partnerId: string; // the person who send the notification 
+  senderName: string;// name of sender 
   senderAvatar?: string | null;
   content: string;
   deleted?: boolean;

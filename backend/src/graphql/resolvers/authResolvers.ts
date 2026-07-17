@@ -82,7 +82,8 @@ export const authResolvers = {
         throw new Error("Password must be at least 8 characters.");
       }
 
-      const existing = await User.findOne({ email: email.toLowerCase() });
+      const existing = await User.findOne({ email: email.toLowerCase(), deletedAt: { $in: [null, false, undefined]} }).sort({ createdAt: -1 });
+      
       if (existing) {
         if (existing.provider === "google") {
           throw new Error("This email is linked to a Google account. Please use Google Sign-In.");
@@ -224,6 +225,7 @@ export const authResolvers = {
           idToken,
           audience: ENV.GOOGLE_CLIENT_ID,
         });
+        //Extracts user information (email, name, picture, Google ID) from the verified token.
         payload = ticket.getPayload();
       } catch {
         throw new Error("Invalid Google token. Please try again.");
@@ -232,7 +234,8 @@ export const authResolvers = {
       if (!payload || !payload.email) {
         throw new Error("Could not retrieve email from Google account.");
       }
-
+      //Gets these values from Google's response:
+      // sub->google id
       const { sub: googleId, email, name = "Delina User", picture } = payload;
 
       let user = await User.findOne({

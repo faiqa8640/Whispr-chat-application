@@ -1,10 +1,11 @@
+
 import { Router } from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
 import { verifyToken } from "../utils/token.js";
 import User from "../models/User.js";
-import Message from "../models/Message.js";
+import Message, { MessageType } from "../models/Message.js"; // NEW: MessageType enum, see Message.ts
 import { buildMediaKey, uploadBufferToS3, deleteMediaObject } from "../utils/s3.js";
 import { formatMessage } from "../graphql/resolvers/messageResolvers.js";
 import { pubsub, EVENTS } from "../graphql/pubsub.js";
@@ -124,7 +125,9 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
       sender: senderId,
       receiver: receiverId,
       content: "",
-      type: "voice",
+      // NEW: MessageType.VOICE instead of the raw "voice" string literal —
+      // see the MessageType comment block in Message.ts.
+      type: MessageType.VOICE,
       mediaKey,
       mediaDuration,
       mediaPending: true,

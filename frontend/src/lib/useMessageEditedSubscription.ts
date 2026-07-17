@@ -27,21 +27,36 @@ interface MessageEditedData {
  * message being edited (content + edited change). Same pattern as
  * useMessageUnsentSubscription — delivered to both participants.
  */
-export function useMessageEditedSubscription(onData: (data: MessageEditedData) => void) {
-  const onDataRef = useRef(onData);
-  onDataRef.current = onData;
 
-  useEffect(() => {
+
+// we create a react hook and it accept a function callled onData 
+// whenever an edited msg would be received this function would be called 
+export function useMessageEditedSubscription(onData: (data: MessageEditedData) => void) {
+  // create the useRef  that stores the latest onData function  and it survive the rerender 
+  // ondata function is a call back
+  const onDataRef = useRef(onData);
+  onDataRef.current = onData;// updates the ref with the latest version of  callback on every render
+
+  useEffect(() => {// runs this code when the components appear on the screen
     const unsubscribe = wsClient.subscribe(
+      // Starts a GraphQL subscription using the WebSocket client.
+      // means start listening for message edit event 
       { query: MESSAGE_EDITED_SUBSCRIPTION },
+      // tell the server to which subscription listen to 
+      // means notify me whenever a message is edited
       {
-        next: (result) => {
+        next: (result) => {// whenever the server send the new data  next runs 
+          // runs everytime the server send the new subscription data
+          
+          // check if the server actually send the data
+          // call the callback function 
           if (result.data) onDataRef.current(result.data as unknown as MessageEditedData);
+          // treat the received data as message edited type
         },
         error: (err) => console.error("Message edited subscription error:", err),
-        complete: () => {},
+        complete: () => {},// runs when the subscription ends 
       }
     );
-    return () => unsubscribe();
+    return () => unsubscribe();// cleaup function
   }, []);
 }
