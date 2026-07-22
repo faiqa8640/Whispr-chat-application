@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 // // nodemailer is a Node.js library that allows your backend to send emails
-import { ENV } from "../config/env.js";
+import { ENV } from "../config/env";
 
 const transporter = nodemailer.createTransport({//create a transported  it knows how to connect to the gmail
   service: "gmail", //this nodemailer to use Gmail's SMTP server.

@@ -1,12 +1,7 @@
-import User from "../models/User.js";
-import { pubsub, EVENTS } from "../graphql/pubsub.js";
+import User from "../models/User";
+import { pubsub, EVENTS } from "../graphql/pubsub";
 
-/**
- * Tracks how many live WebSocket connections each user currently has open
- * (multiple browser tabs/devices count separately). A user is "online" as
- * long as this count is above zero, and only flips to "offline" — with a
- * recorded lastSeen — once their very last connection drops.
- */
+//connectionCounts-----------------------------
 const connectionCounts = new Map<string, number>();
 // the user could have multiple active connection in diff tabs or diff devices
 //so we create a in memory js map to count all the active connectiin
@@ -14,14 +9,15 @@ const connectionCounts = new Map<string, number>();
 // the connection are the web socket connnection
 
 
-// isuseronline -> this check the active connections of the user 
+//isUserOnline-----------------------------
+// isuseronline -> this check the active connections of the user  => return true or falsse 
 export function isUserOnline(userId: string): boolean {
     // if the connectioncount of certain user is null or no then return 0 (no connection count)=> false 
     // if there is atleast one or more active connection then i.e 1>0 -> return true(have connection openn) ,if 0>0 -> return false (have no connection open)
   return (connectionCounts.get(userId) ?? 0) > 0;
 }
 
-
+//markUserOnline-----------------------------
 // this fucntion runs whenever a websocket connection opens
 // the function is asgn but dont return anything
 
@@ -34,29 +30,35 @@ export async function markUserOnline(userId: string): Promise<void> {
 // with every  new connection we dont mark the user login again and agaim so keep that in your mind 
 
   // Only the *first* connection is a real transition from offline -> online.
-  if (current === 0) {
-    pubsub.publish(EVENTS.USER_STATUS_CHANGED, {
+  if (current === 0) { // if curr=0 means a connection is establiadh 
+    pubsub.publish(EVENTS.USER_STATUS_CHANGED, {// we publish the event 
       userStatusChanged: { userId, isOnline: true, lastSeen: null },
     });
   }
 }
 
-// this function runs whenever one websocket connection closes
-export async function markUserOffline(userId: string): Promise<void> {
-  const current = connectionCounts.get(userId) ?? 0;//get the current connection count 
-  const next = Math.max(0, current - 1);//get the new connection count after the one connection closes
 
+// markUserOffline -----------------------------
+// this function runs whenever one websocket connection closes 
+export async function markUserOffline(userId: string): Promise<void> {
+  // connectionCounts.get(userId) =>  get that how many tabs of certain user is opened  currently 
+  const current = connectionCounts.get(userId) ?? 0;//get the current connection count 
+  // if no connection exist then current  = 0 
+  const next = Math.max(0, current - 1);//get the new connection count after the one connection closes
+  // i.e curr=2 => max(0,1) => next =1 
+
+  // after closing the current connection => the next ===0 => means no other connection exist 
   if (next === 0) {// if there is no more active connection-> then the user is marked from "online ->offline"
-    connectionCounts.delete(userId);// delete the connection count
-    const lastSeen = new Date();// last seen is et 
-    // Best-effort — even if the DB write fails, the in-memory state and
-    // the live subscription event below still reflect the disconnect.
+    connectionCounts.delete(userId);// so we delete the user from the connection map as there is no need to save  0 con
+    const lastSeen = new Date();// last seen is set to current date 
+    // go to the db find the user and update them adn set the last seen 
+    // .catch(() => {} => ignore the error and continue 
     await User.findByIdAndUpdate(userId, { lastSeen }).catch(() => {});//set the last seen 
     pubsub.publish(EVENTS.USER_STATUS_CHANGED, {// publish the event
       userStatusChanged: { userId, isOnline: false, lastSeen },
     //   setting is theisonline false and setting the last seen
     });
-  } else {
+  } else {//if the user is still online => next = 2 =>  so inthat case set the connection count just 
     connectionCounts.set(userId, next);
   }
 }

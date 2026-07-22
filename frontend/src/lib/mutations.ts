@@ -1,7 +1,9 @@
 // ─── Auth Mutations ───────────────────────────────────────────────────────────
 
 // MUTATION OF SIGNUP
-export const SIGNUP_MUTATION = /* GraphQL */ `
+export const SIGNUP_MUTATION = /* GraphQL 
+=> uses the backteacks as it create a template string 
+signup()=> this calls the resolver */ `
   mutation Signup($name: String!, $email: String!, $password: String!) {
     signup(name: $name, email: $email, password: $password) {
       success
@@ -10,7 +12,10 @@ export const SIGNUP_MUTATION = /* GraphQL */ `
   }
 `;
 
-export const VERIFY_OTP_MUTATION = /* GraphQL */ `
+export const VERIFY_OTP_MUTATION = /* GraphQL  
+=> it calls the verifyotp resolver 
+=> after verfication => you need a login user so we get the login use and mes
+=> return authpayload */ `
   mutation VerifyOtp($email: String!, $otp: String!) {
     verifyOtp(email: $email, otp: $otp) {
       user {
@@ -39,7 +44,8 @@ export const RESEND_OTP_MUTATION = /* GraphQL */ `
   }
 `;
 
-export const LOGIN_MUTATION = /* GraphQL */ `
+export const LOGIN_MUTATION = /* GraphQL 
+=> return authpayload=> user+ msg*/ `
   mutation Login($email: String!, $password: String!) {
     login(email: $email, password: $password) {
       user {
@@ -106,7 +112,8 @@ export const RESET_PASSWORD_MUTATION = /* GraphQL */ `
   }
 `;
 
-export const UPDATE_PROFILE_MUTATION = /* GraphQL */ `
+export const UPDATE_PROFILE_MUTATION = /* GraphQL 
+=> return the use id,name etc */ `
   mutation UpdateProfile($name: String, $avatar: String) {
     updateProfile(name: $name, avatar: $avatar) {
       id
@@ -134,7 +141,8 @@ export const DELETE_ACCOUNT_MUTATION = /* GraphQL */ `
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
-export const ME_QUERY = /* GraphQL */ `
+export const ME_QUERY = /* GraphQL 
+=> backend sends the logined user */ `
   query Me {
     me {
       id
@@ -153,13 +161,15 @@ export const ME_QUERY = /* GraphQL */ `
 
 // ─── For conversation ──────────────────────────────────────────────────────────────────
 
-export const FIND_USER_BY_EMAIL_QUERY = /* GraphQL */ `
+export const FIND_USER_BY_EMAIL_QUERY = /* GraphQL 
+=> run the finduserbyemail resolver */ `
   query FindUserByEmail($email: String!) {
     findUserByEmail(email: $email) { id name email avatar }
   }
 `;
 
-export const CONVERSATIONS_QUERY = /* GraphQL */ `
+export const CONVERSATIONS_QUERY = /* GraphQL 
+=> return the conversation (sidebar) */ `
   query Conversations {
     conversations {
       partner { id name email avatar isOnline lastSeen isDeleted}

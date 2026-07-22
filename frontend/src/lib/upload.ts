@@ -1,26 +1,33 @@
+//media API service of your application.
+// we have 2 different flow 
+// 1) image upload and  2) voice upload 
+
+//this stores the backend url
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-export interface UploadResult {
-  key: string;
-  url: string;
+export interface UploadResult {// it describe the shape of the data => backend return thres 2 
+  key: string;// key is the media key and 
+  url: string;// 
 }
 
-export async function uploadMedia(
-  file: File | Blob,
-  kind: "image" | "voice",
-  filename: string
-): Promise<UploadResult> {
-  const formData = new FormData();
-  formData.append("file", file, filename);
+export async function uploadMedia(// this function upload one media file 
+  file: File | Blob,// can accept image file or audio blob
+  // audio blob is just and object in the browser that contain the file like data 
+  kind: "image" | "voice", // only 2 values are allowed 
+  filename: string// get the file name 
+): Promise<UploadResult> { // return the promise and return the key and url after uploading 
+  const formData = new FormData(); // store the form data 
+  formData.append("file", file, filename);// add one field 
+  // file=image.png => backend receives the req.file through the multer 
 
   const res = await fetch(`${API_BASE}/api/upload?kind=${kind}`, {
-    method: "POST",
-    credentials: "include",
-    body: formData,
+    method: "POST",// uploading chnage the server data so post 
+    credentials: "include",//added the cookies 
+    body: formData,// added the body
   });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+  if (!res.ok) { // is reposnse is not okay then return the error 
+    const body = await res.json().catch(() => ({})); // 
     throw new Error(body.error || "Upload failed. Please try again.");
   }
 

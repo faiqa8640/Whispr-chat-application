@@ -1,9 +1,20 @@
+// basically your backend starts => it load .env file and load all the variables 
+// and store them in the inside env 
+// and other file then can use these variable
+
+// dotenv => is the library that is used to read the files from the .env 
+
+
 import dotenv from "dotenv";//dotenv is to read the values stored inside your .env file.
-dotenv.config();//load the .env file
+dotenv.config();//read the .env file and load all the variables 
+
 
 const PORT = parseInt(process.env.PORT || "5000", 10);
-// parseInt ->it return the number -> like without it-> 5000 will be string -> after it is is a number
-// 10 means intercept this as a decimal base
+// process.env.PORT = 5000 => is the port where the backend run
+// it is a string not a number => so using the parseInt we convert it into the number
+// it is string coz everything in the .env is stored as a text 
+// 10 => it tells the javascript to read a number using the base 10 (Decimal)
+// parseInt("5000",10)=> becomes 5000
 
 export const ENV = {
   // Server

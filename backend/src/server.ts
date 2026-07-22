@@ -42,7 +42,7 @@ function getCookie(cookieHeader: string | undefined, name: string): string | und
 
     // match is saying that do we find something 
     // if yes  => then match.slide(name.length+1)
-    // match.slide(name.length+1) => get the  len of the name and  then add one to it 
+    // match.slice(name.length+1) => get the  len of the name and  then add one to it 
     //why adding 1? coz of the  eq sign => so lets say 
     // delina_token= => len = 13 so 13+1 = 14 
     // as we only want abc123 so we slice it after the equal sign 
@@ -132,7 +132,7 @@ async function main() {
         // "theme=dark; language=en; delina_token=ABC123"
         // the token will store the abc123 => the value of the cookie  
         const token = getCookie(ctx.extra?.request?.headers?.cookie, "delina_token");
-        let user = null;//intionally we dont know how connected therefor the user is null
+        let user = null;//intionally we dont know who connected therefor the user is null
         if (token) {// check that if the browser send the token 
           // if the token exist then we verify it else we ignore 
           try {
@@ -177,9 +177,9 @@ async function main() {
   // env.port => it contain the port number 
   // this means that start the server on the port 5000
   httpServer.listen(ENV.PORT, () => {// we use the callback function 
-   // we use the callback => to run this code after something finishes 
+   // we use the callback => to run this code after something finishes  t
   // so after the server starts we  execute this function
-  // we just log this 
+  // we just log this  
   // the mutataion and query goes to the http://localhost:5000/graphql=>coz uses http prtocol
     console.log(`GraphQL ready at http://localhost:${ENV.PORT}/graphql`);
     // now for websockt => it uses a different protocol => ws://

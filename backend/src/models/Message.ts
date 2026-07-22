@@ -30,16 +30,16 @@ export interface IReaction {
 }
 
 export interface IMessage extends Document {
+  conversation: mongoose.Types.ObjectId;// conversation id for the conversations 
   sender: mongoose.Types.ObjectId;
   receiver: mongoose.Types.ObjectId;
   content: string;
   type: MessageType;
-  mediaKey?: string;// the key after sorted to the s3 
-  mediaDuration?: number; 
-  mediaPending?: boolean;//tells that has the media uploaded or is pending 
-  read: boolean;
-  deleted: boolean;
-  edited: boolean;
+  resource?:mongoose.Types.ObjectId;// resource id for the resources 
+  isRead: boolean;
+  isDeleted: boolean;
+  deletedAt?: Date;
+  isEdited: boolean;
   replyTo?: mongoose.Types.ObjectId;
   reactions: IReaction[];//we are using the array coz one message could have multiples reactions
   createdAt: Date;
@@ -73,6 +73,7 @@ const ReactionSchema = new Schema<IReaction>(
 
 const MessageSchema = new Schema<IMessage>(
   {
+    conversation: { type:Schema.Types.ObjectId, ref: "Conversation", required:true , index:true},
     sender: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     // index => make a shortcut for this feild => now the things is that the search become easier
     receiver: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
@@ -81,7 +82,7 @@ const MessageSchema = new Schema<IMessage>(
       // the message should or should not have a content depens on the message 
       //like if text msg => content required  but if the msg is voice or image or is deleted -> then no content requried
       required: function (this: IMessage) {
-        return !this.deleted && this.type === MessageType.TEXT;
+        return !this.isDeleted && this.type === MessageType.TEXT;
       },
       trim: true, //remove spaces
       maxlength: 5000, //means max character of the message 
@@ -91,12 +92,11 @@ const MessageSchema = new Schema<IMessage>(
     // add a new MessageType member later and it's automatically a valid
     // value here too, no separate array to keep in sync.
     type: { type: String, enum: Object.values(MessageType), default: MessageType.TEXT },
-    mediaKey: { type: String },
-    mediaDuration: { type: Number },
-    mediaPending: { type: Boolean, default: false },
-    read: { type: Boolean, default: false },
-    deleted: { type: Boolean, default: false },
-    edited: { type: Boolean, default: false },
+    resource : {type: Schema.Types.ObjectId, ref: "Resource", default : null },
+    isRead: { type: Boolean, default: false },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt : {type: Date , default: null},
+    isEdited: { type: Boolean, default: false },
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },
     reactions: { type: [ReactionSchema], default: [] },// an  array of reaction schema
   },
@@ -111,5 +111,14 @@ const MessageSchema = new Schema<IMessage>(
 // created at descending  order
 MessageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
 
-const Message: Model<IMessage> = mongoose.model<IMessage>("Message", MessageSchema);
+
+//creating the model  => for the messages 
+
+const Message: Model<IMessage> = 
+  mongoose.models.Message ||
+  mongoose.model<IMessage>("Message", MessageSchema);
 export default Message;
+
+
+
+

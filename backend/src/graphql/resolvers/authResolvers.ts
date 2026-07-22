@@ -1,7 +1,8 @@
-import bcrypt from "bcryptjs";
-import { OAuth2Client } from "google-auth-library";
-import User from "../../models/User.js";
-import { ENV } from "../../config/env.js";
+import bcrypt from "bcryptjs"; // used to  has passwords 
+import { OAuth2Client } from "google-auth-library";//This is Google's library.
+// It is used to verify Google Sign-In tokens.
+import User from "../../models/User";
+import { ENV } from "../../config/env";
 import {
   signToken,
   attachCookie,
@@ -10,17 +11,21 @@ import {
   otpExpiryDate,
   generateResetToken,
   resetTokenExpiryDate,
-} from "../../utils/token.js";
-import { sendOtpEmail, sendPasswordResetEmail } from "../../utils/mailer.js";
-import { AuthContext, requireAuth } from "../../middleware/authContext.js";
+} from "../../utils/token";
+import { sendOtpEmail, sendPasswordResetEmail } from "../../utils/mailer";
+import { AuthContext, requireAuth } from "../../middleware/authContext";
 import { pubsub, EVENTS } from "../pubsub";
-import { isUserOnline } from "../../utils/onlineStatus.js";
+import { isUserOnline } from "../../utils/onlineStatus";
 
+
+// This creates a Google OAuth client.
+// Whenever someone signs in with Google this object verifies the token. 
 const googleClient = new OAuth2Client(ENV.GOOGLE_CLIENT_ID);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 export function formatUser(user: InstanceType<typeof User>) {
-  const id = user._id.toString();
+  // InstanceType<typeof User>: The type of an actual User document created from the User model."
+  const id = user._id.toString();  //store the id of the user 
 
   // Deleted accounts: render a stable "Deleted User" placeholder instead of
   // real profile info everywhere this user is referenced (messages,
@@ -49,11 +54,7 @@ export function formatUser(user: InstanceType<typeof User>) {
     provider: user.provider,
     avatar: user.avatar ?? null,
     isVerified: user.isVerified,
-    // Presence is derived live from the in-memory connection tracker, not
-    // stored on the document — it reflects whoever is *currently* connected.
     isOnline: isUserOnline(id),
-    // Only meaningful when isOnline is false; null otherwise (or for
-    // accounts that have never disconnected since this field existed).
     lastSeen: user.lastSeen ?? null,
     isDeleted: false,
     createdAt: user.createdAt,
@@ -63,12 +64,20 @@ export function formatUser(user: InstanceType<typeof User>) {
 
 // ─── Resolvers ────────────────────────────────────────────────────────────────
 export const authResolvers = {
-  Query: { // used for testing
+  Query: {
 
+    // 3 paramertes  = parent , args, context , info  and ignore the info 
+    // _ -> not using the parameter  of the name 
+    // args => these are passed from the frontend 
+    // ctx => is the context 
+    // -> it backpack that GraphQL gives to every resolver.
+    // it contain info such as =>the logged-in user, cookies , request ,response 
     me: async (_: unknown, __: unknown, ctx: AuthContext) => { // this return currently logined user
-      if (!ctx.user) return null;
+      // earlier after authtntication middleware  -> verify the jwt , find the user and store it into the context
+      // hence eevery resolver can access the  logined user 
+      if (!ctx.user) return null;//"Is anyone logged in?"
       const user = await User.findById(ctx.user._id);
-      return user ? formatUser(user) : null;
+      return user ? formatUser(user) : null;// if user find then format i
     },
   },
 
@@ -82,8 +91,8 @@ export const authResolvers = {
         throw new Error("Password must be at least 8 characters.");
       }
 
-      const existing = await User.findOne({ email: email.toLowerCase(), deletedAt: { $in: [null, false, undefined]} }).sort({ createdAt: -1 });
-      
+      const existing = await User.findOne({ email: email.toLowerCase() }).sort({ createdAt: -1 });
+      //, deletedAt: { $in: [null, false, undefined]}
       if (existing) {
         if (existing.provider === "google") {
           throw new Error("This email is linked to a Google account. Please use Google Sign-In.");
@@ -94,7 +103,8 @@ export const authResolvers = {
         // Not verified yet — update details and resend OTP
         // NOTE: assign plain password; the pre-save hook will hash it
         const otp = generateOtp();
-        const hashedOtp = await bcrypt.hash(otp, 10);
+        const hashedOtp = await bcrypt.hash(otp, 10);// 10 is the cost/work factor  / salt round
+        // It tells bcrypt how much work to do when creating the hash
         existing.otpCode = hashedOtp;
         existing.otpExpires = otpExpiryDate();
         existing.password = password;          
@@ -129,7 +139,7 @@ export const authResolvers = {
       ctx: AuthContext
     ) => {
       const user = await User.findOne({ email: email.toLowerCase() }).select(
-        "+otpCode +otpExpires"
+        "+otpCode +otpExpires" // coz for them select =false  => so we explicity mentiion them to download it 
       );
       if (!user) throw new Error("No account found with that email.");
       if (user.isVerified) throw new Error("This account is already verified.");
@@ -219,13 +229,15 @@ export const authResolvers = {
       { idToken }: { idToken: string },
       ctx: AuthContext
     ) => {
-      let payload;
-      try {
+      let payload; // create a variable called payload 
+      try {// backend ask the google if it is actually created by google => if true google return ticket 
+        // ticket contain user information 
         const ticket = await googleClient.verifyIdToken({
           idToken,
-          audience: ENV.GOOGLE_CLIENT_ID,
+          audience: ENV.GOOGLE_CLIENT_ID, // is that token created for this app 
         });
         //Extracts user information (email, name, picture, Google ID) from the verified token.
+        // payload => contains the Google user's profile. 
         payload = ticket.getPayload();
       } catch {
         throw new Error("Invalid Google token. Please try again.");
@@ -236,6 +248,7 @@ export const authResolvers = {
       }
       //Gets these values from Google's response:
       // sub->google id
+      // object destructuring. => we are doing here 
       const { sub: googleId, email, name = "Delina User", picture } = payload;
 
       let user = await User.findOne({
@@ -329,8 +342,8 @@ export const authResolvers = {
       { name, avatar }: { name?: string; avatar?: string },
       ctx: AuthContext
     ) => {
-      const authUser = requireAuth(ctx);
-      const user = await User.findById(authUser._id);
+      const authUser = requireAuth(ctx); // get the authenticated user 
+      const user = await User.findById(authUser._id); //get that user 
       if (!user) throw new Error("User not found.");
 
       if (name) user.name = name;

@@ -1,8 +1,8 @@
 
 import { Router } from "express";
-import { Readable } from "stream";
-import { verifyToken } from "../utils/token.js";
-import { ENV } from "../config/env.js";
+import { Readable } from "stream";// is used to work eith streams 
+import { verifyToken } from "../utils/token";
+import { ENV } from "../config/env";
 
 // we use it(this file) to avoid the brosers cors error
 // without it the normal flow is:
@@ -25,6 +25,8 @@ import { ENV } from "../config/env.js";
 // so we convert the converts the S3/fetch stream into a Node-readable stream.
 const router = Router();//create a router instance
 
+
+// help to download the file 
 // Proxies a signed S3 URL through our own server so the browser's fetch()
 // call is same-origin (talks to us, not S3 directly) and never hits a CORS
 // wall — regardless of what CORS config the bucket does or doesn't have.
@@ -39,15 +41,18 @@ router.get("/download", async (req, res) => {
       return res.status(401).json({ error: "Session expired. Please log in again." });
     }
 
+    //req.query contain the url of the  image 
     const url = req.query.url as string;// read the url query parameter from the requeest
     // the url is of the image to be downloaded
     if (!url) return res.status(400).json({ error: "Missing url." });//if no then the url is missing 
 
-    let parsed: URL;//create an object that create the parsed url
+    let parsed: URL;//create an object that will hold the object url 
     try {
-      parsed = new URL(url);
+      parsed = new URL(url); //  we break the url into  pieaces 
+      // i.e "https://bucket.s3.amazonaws.com/image.jpg" (original )
+      // protocol= https , hostname = mybucket.s3.us-east-1.amazonaws.com etc 
       // instead of treating it as a  plain text 
-      // node convert url into protocol, hostname , pathname , search
+      // node convert url into protocol, hostname , pathname , search****
       // as we need to inspect the host name below so therefor we used it
       //new URL(url) checks whether the supplied string is a valid URL.
     } catch {
@@ -62,13 +67,18 @@ router.get("/download", async (req, res) => {
     // so the host name will be kind of gp-bucket-001.s3.ap-south-1.amazonaws.com
     const allowedHost = `${ENV.AWS_BUCKET_NAME}.s3.${ENV.AWS_REGION}.amazonaws.com`;
     if (parsed.hostname !== allowedHost) {//security check
+      // that the hostname should  be equal to the allowed host only otherwise not allowed 
       return res.status(400).json({ error: "URL not allowed." });// if url is not equal to host name then error
     }
 
 
     // means->“Backend, go to this S3 URL and get the file for me
     // magine upstream as an S3 reply package:
-    const upstream = await fetch(url);//Your backend now fetches the signed S3 URL.
+    
+    const upstream = await fetch(url);//Backend, go to AWS S3 and download this file for me.
+    // backend=> fetch(url) =>aws s3
+    // upstream => is kind of pakage that contain everything s3 send 
+    // it contain  statu, oky, header ,body 
     if (!upstream.ok || !upstream.body) {
         // Checks whether S3 returned a successful response and a file body.
         //upstream.ok is true for successful status codes such as 200.
@@ -76,27 +86,40 @@ router.get("/download", async (req, res) => {
       return res.status(502).json({ error: "Could not fetch the file." });
     }
 
+
+    // res.setHeader() is an Express/Node function used to send HTTP headers to the browser.
     // Now S3 successfully sent the file. Your backend needs to tell the browser what kind of file it is
     res.setHeader(//Copies the file’s content type from S3 to the browser.
-      "Content-Type",// get the content type and if not then return it as a generic so we are just telling the  broswer
+      "Content-Type",// tell the browser What kind of file am I sending?
+      // get the content type and if not then return it as a generic so we are just telling the  broswer
+      // basicallly s3 send the content tpye => if not send => null 
+      // application/octet-stream => it is a generic baniry file library  
+      // meansI don't know exactly what file this is, but it's some kind of file."
+      // so browser will download it 
       upstream.headers.get("content-type") || "application/octet-stream"
     );
 
     // This helps the browser understand what kind of file it is downloading.
-   
+
+    // getting the file name => if frontend send the file name => then filename = cat.png
+    // else the filename = download 
     const filename = (req.query.filename as string) || "download";
-     //Do not just show this file in the page. Download it.
+
+
+    // This header tells the browser how to handle the file.
+    // Content-Disposition => there are 2 common values => content-disposition = inline
+    // means bowser tries to open it 
+    // content-disposition = attachment => browser download it  and download it with the file name if exist
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
 
-    // This is the actual file transfer.
-    // S3 response stream
-    // → converted to Node stream
-    // → piped into Express response
-    // → browser receives the downloaded file
-    // converts S3’s file-data format into a Node.js stream format that Express understands.
-    // think of stream like Sending a file little by little, instead of loading the whole file at once.”
-    //pipe(res)->Send those file pieces into the response going back to the browser.”
+    //* why use streaming => much faster and user less ram
+  //upstream.body => this is the file coming from the s3 and it is the webstream
+  //express understand the node stream
+  // so we convert the webstrem to the node stream  => using readable.fromweb
+  // .pipe() => means takes everything from this stream and send it to another stream
+  // spo from node stream to response => browser receiver the downloaded file 
+  // so s3 => webstream => nodesteeam => response => broswer
     Readable.fromWeb(upstream.body as any).pipe(res);
   } catch (err) {
     console.error("Media proxy error:", err);

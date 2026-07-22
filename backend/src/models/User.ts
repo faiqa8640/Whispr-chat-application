@@ -45,11 +45,11 @@ export interface IUser extends Document {
   updatedAt: Date;
 
  //every user object have a function called  matchpassword 
- // why promise => coz bcrupt works ascynchronously 
+ // why promise => coz bcrupt works ascynchronously  
   matchPassword(enteredPassword: string): Promise<boolean>;
 }
 
-// interface => it is only for the tyepscript 
+// interface => it is only for the tyepscript  
 // schema => is used by the mongoose => it control how data is store in the db 
 
 const UserSchema = new Schema<IUser>(
@@ -118,7 +118,7 @@ UserSchema.pre<IUser>("save", async function () {
   // higher the number => the hashing takes  more time which maked password harder to guess by the attacker 
   // salt => generate a random value or number 
   // gensalt=> create a random salt
-  // await coz it take time 
+  // await coz it take time  
   // 10 is the cost factor or work factor 
   // this is kind of difficulty level 
   // cost 5 => very fast => less secure 
@@ -168,7 +168,9 @@ UserSchema.methods.matchPassword = async function (
 //so basically  mongoose take the userschema  and create a user model
 // and connect to its user collection
 // return the model and store it inside the variable user
-const User: Model<IUser> = mongoose.model<IUser>("User", UserSchema);
+const User: Model<IUser> = 
+  mongoose.models.User ||
+  mongoose.model<IUser>("User", UserSchema);
 // conclusion :
 //Create a Mongoose model called User using the UserSchema, and 
 // let TypeScript know that every document follows the IUser interface.
