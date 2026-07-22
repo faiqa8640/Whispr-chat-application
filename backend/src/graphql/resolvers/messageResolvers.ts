@@ -110,105 +110,119 @@ export const messageResolvers = {
 
 
     // __________coversation(sidebar)__________________________________________________
-    conversations : async (_: unknown, __: unknown, ctx: AuthContext)=>{
-      const me = requireAuth(ctx); // check if the user is authenticated
-      const userId = me._id.toString(); // get the current logined  user id 
+    // return us the  other participant , last message and the unread message count
+    conversations: async (_: unknown, __: unknown, ctx: AuthContext) => {
+      const currentUser = requireAuth(ctx);// authticate the user
+      const currentUserId = currentUser._id.toString();// get the user id 
 
-      //get all the conversation  of the logined user and populate them 
-      const convos = await Conversation.find({participents: userId})
-        .populate("participents")
+      const conversations = await Conversation.find({
+        //get the all the conversations of currently logined user 
+        participents: currentUserId,
+      })
+        .sort({ updatedAt: -1 })// we sort the conversation based on the updated at 
+        .populate("participents")// populate the participants
         .populate({
           path: "lastMessage",
-          populate:[
-            {path: "sender"},
-            {path : "receiver"},
-            {path: "resource"},
-            {path : "reactions.user"},
+          populate: [
+            { path: "sender" },
+            { path: "receiver" },
+            { path: "resource" },
+            { path: "reactions.user" },
           ],
-        })
-
-        //ORDERING OF THE CONVERSATION:
-        //so basically we sort the conversations 
-        // we take the 2 convo at a time => convo a and convo b
-        convos.sort((convo_a, convo_b) => {
-          //find the time for convo a 
-          // check does the convo a have a last message 
-          // if yes => then get the time the last message is created 
-          // if no => then get the updatedat 
-          // why updatedat ?  if the convo is just created and no last msg yet 
-          // in that case the lastmessage= null and updatedat exist so we use it 
-          const a_convoTime = convo_a.lastMessage ? (convo_a.lastMessage as any).createdAt : convo_a.updatedAt;
-          //do the same for the convo b and get the time for the convo b 
-          const b_convoTime = convo_b.lastMessage ? (convo_b.lastMessage as any).createdAt : convo_b.updatedAt;
-          //new Date(b_convoTime) => we convert the date into the javascript object
-          // .getTime() => it convert the date into the milisec  since that date
-          // i.e 1 jan 1970 => 17846.. minisec 
-          //=> why milisec => coz become easier to compare 
-          //=> and then we subtract them 
-          // i.e  let convo_A => at 10:00 => let say 100 milisec 
-          // and convo_B -> at 11:00 => let say 200 milisec
-          // now 200-100 = 100 => a positive value => means put B before A
-          // similiarly if -ve value  => put  A before B
-          return new Date(b_convoTime).getTime() - new Date(a_convoTime).getTime();
         });
 
-        const results= [];// make the array of result
-        for(const convo of convos){// loop through each convo
-          //so we get the partner  => the person we have the convo with
-          const partner= (convo.participents as any[]).find(
-            (p)=> p._id.toString()!==userId
-          );
+      return Promise.all(// we process all the conversations together
+        //conversations.map => take every conversation and  return a new object 
+        //seperate object for each conversation 
+        conversations.map(async (conversation) => {
+          //we are apply Array destructuring => 
+          // the firstparticipant = participants[0], and secondparticipant = participants[1]
+          const [firstParticipant, secondParticipant] =
+            conversation.participents as any[];
 
-          if(!partner) continue; // if partner dont exxist return
+          const otherParticipant =// the chart partner
+          // the oetherparticipant is the person whom the current user have the conversation with 
+            firstParticipant._id.toString() === currentUserId
+              ? secondParticipant
+              : firstParticipant;
 
-          results.push({// return the partner ,last message and the unread message count
-            partner: formatUser(partner),
-            // if the last message exist format it and return it => else return null
-            lastMessage: convo.lastMessage? await formatMessage(convo.lastMessage):null,
-            //unreadcount => it is a map that contain the participents along with there unread msgs
-            //Give me the unread count for the currently logged-in user.
-            // i.e unreadcount => {["u1", 0], ["u2",2]}
-            // so get(u1)=> suposing u1 is the logined user => this give us the unread msg count for 
-            // that user => 0 
-            //??0 -> if the value dont exist return zero          
-            unreadCount: convo.unreadCounts?.get(me._id.toString())??0,
-          });
-        }
-      return results; // contain the partener , lastmessage, unreadcount
+          return {
+            id: conversation._id.toString(),
+            otherParticipant: formatUser(otherParticipant),
 
+            lastMessage: conversation.lastMessage
+              ? await formatMessage(conversation.lastMessage)
+              : null,
+
+            unreadCount:
+              conversation.unreadCounts?.get(currentUserId) ?? 0,
+          };
+        })
+      );
     },
 
 
     // __________messages(inbox)__________________________________________________
+    // messages: async (
+    //   _: unknown,
+    //   { withUserId, limit = 50 }: { withUserId: string; limit?: number },
+    //   //  given the userid (of the partner)and the limit -> the default limit of the message history is 50
+    //   ctx: AuthContext
+    // ) => {
+    //   const me = requireAuth(ctx);// check the authenticated user and get it
+    //   const docs = await Message.find({// find the message in whic the user is either sender or receiver
+    //     // of the convo  with the partener
+    //     $or: [
+    //       { sender: me._id, receiver: withUserId },
+    //       { sender: withUserId, receiver: me._id },
+    //     ],
+    //   })
+    //     .sort({ createdAt: -1 })// sort the message in the desending order
+    //     // oldest comes first
+    //     .limit(limit)// apply the limit to the messsages
+    //     .populate("sender")// populate the sendeer and receiver and replyto
+    //     .populate("receiver")
+    //     .populate("resource")
+    //     .populate({ path: "replyTo", populate: { path: "sender" } })
+    //     .populate("reactions.user"); // who reacted with what
+    //     // after this the things is that the message are in the order
+    //     // oldest message first 
+    //     // i.e zain ->10:40 and then zain->10:30
+
+    //   const ordered = docs.reverse();//so we reverse it .. now the oldeest is the newest 
+    //   // This formats every message before returning it.
+    //   return Promise.all(ordered.map(formatMessage));// format all the messages 
+    // },
+
+
     messages: async (
       _: unknown,
-      { withUserId, limit = 50 }: { withUserId: string; limit?: number },
-      //  given the userid (of the partner)and the limit -> the default limit of the message history is 50
+      { conversationId, limit = 50 }: { conversationId: string; limit?: number },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);// check the authenticated user and get it
-      const docs = await Message.find({// find the message in whic the user is either sender or receiver
-        // of the convo  with the partener
-        $or: [
-          { sender: me._id, receiver: withUserId },
-          { sender: withUserId, receiver: me._id },
-        ],
-      })
-        .sort({ createdAt: -1 })// sort the message in the desending order
-        // oldest comes first
-        .limit(limit)// apply the limit to the messsages
-        .populate("sender")// populate the sendeer and receiver and replyto
+      const me = requireAuth(ctx);
+
+      // Authorization: make sure the caller is actually a participant of
+      // this conversation before returning anything from it.
+      const convo = await Conversation.findById(conversationId);
+      if (
+        !convo ||
+        !convo.participents.map((p) => p.toString()).includes(me._id.toString())
+      ) {
+        throw new Error("Conversation not found.");
+      }
+
+      const docs = await Message.find({ conversation: conversationId })
+        .sort({ createdAt: -1 }) // newest first — no reverse() anymore
+        .limit(limit)
+        .populate("sender")
         .populate("receiver")
         .populate("resource")
         .populate({ path: "replyTo", populate: { path: "sender" } })
-        .populate("reactions.user"); // who reacted with what
-        // after this the things is that the message are in the order
-        // oldest message first 
-        // i.e zain ->10:40 and then zain->10:30
+        .populate("reactions.user");
 
-      const ordered = docs.reverse();//so we reverse it .. now the oldeest is the newest 
-      // This formats every message before returning it.
-      return Promise.all(ordered.map(formatMessage));// format all the messages 
+      // Ordering is now the frontend's job — return as-is (newest first).
+      return Promise.all(docs.map(formatMessage));
     },
 
 
@@ -304,6 +318,7 @@ export const messageResolvers = {
           replyTo = replyToId;
         }
       }
+
 
       //find or create the conversation btw the authenticated use and the receiver
       const conversation= await findOrCreateConversation(me._id.toString(), receiverId);
@@ -404,6 +419,21 @@ export const messageResolvers = {
       }
 
       return true;
+    },
+
+
+    //// __________startconversation__________________________________________________
+    startConversation: async (
+      _: unknown,
+      { otherUserId }: { otherUserId: string },
+      ctx: AuthContext
+    ) => {
+      const me = requireAuth(ctx);
+      if (otherUserId === me._id.toString()) throw new Error("You can't message yourself.");
+      const other = await User.findById(otherUserId);
+      if (!other || other.deletedAt) throw new Error("This account no longer exists.");
+      const convo = await findOrCreateConversation(me._id.toString(), otherUserId);
+      return convo._id.toString();
     },
 
     // __________unsendmessage__________________________________________________

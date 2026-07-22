@@ -149,7 +149,8 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
   #-----------------------------
 
   type Conversation {
-    partner: User!
+    id: ID!
+    otherParticipant: User!
     lastMessage: Message
     unreadCount: Int!
   }
@@ -226,7 +227,7 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     # limit => it the limit that in a convo this number of messages are allowed
     # [Message!]! => always return the array of valid message object
     #----------------------------
-    messages(withUserId: ID!, limit: Int): [Message!]!
+    messages(conversationId: ID!, limit: Int): [Message!]!
 
     # userStatus ------------
     # the frontend ask that the userid (some use) => it is online 
@@ -363,6 +364,13 @@ export const typeDefs = /* GraphQL SCHEMAS -> LANGUAGE USE HERE IS GraphQL Schem
     Returns the updated message with its full reactions list.
     """
     toggleReaction(messageId: ID!, emoji: String!): Message!
+
+
+    """
+    Returns the id of the conversation with this user, creating it if it
+    doesn't exist yet (e.g. starting a brand-new chat via "New message").
+    """
+    startConversation(otherUserId: ID!): ID!
   }
 
   # ── SUBSCRIPTION ────────────────────────────────────────────────────────────────────

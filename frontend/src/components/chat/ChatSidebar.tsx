@@ -20,6 +20,7 @@ import {
 } from "../../lib/notifications";
 
 interface ConversationItem {
+  id: string;
   partner: {
     id: string;
     name: string;
@@ -353,7 +354,7 @@ export default function ChatSidebar({ activeId }: { activeId?: string }) {
                   <button
                     onClick={() =>
                       navigate(`/chat/${c.partner.id}`, {
-                        state: { partnerName: c.partner.name, partnerAvatar: c.partner.avatar },
+                        state: { partnerName: c.partner.name, partnerAvatar: c.partner.avatar, conversationId: c.id, },
                       })
                     }
                     className={`group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${

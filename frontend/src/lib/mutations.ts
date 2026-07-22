@@ -168,27 +168,33 @@ export const FIND_USER_BY_EMAIL_QUERY = /* GraphQL
   }
 `;
 
-export const CONVERSATIONS_QUERY = /* GraphQL 
-=> return the conversation (sidebar) */ `
+export const CONVERSATIONS_QUERY = /* GraphQL */ `
   query Conversations {
     conversations {
-      partner { id name email avatar isOnline lastSeen isDeleted}
+      id
+      partner: otherParticipant { id name email avatar isOnline lastSeen isDeleted }
       lastMessage { id content type createdAt read deleted sender { id } }
       unreadCount
     }
   }
 `;
 
-
 export const MESSAGES_QUERY = /* GraphQL */ `
-  query Messages($withUserId: ID!, $limit: Int) {
-    messages(withUserId: $withUserId, limit: $limit) {
+  query Messages($conversationId: ID!, $limit: Int) {
+    messages(conversationId: $conversationId, limit: $limit) {
       id content type mediaUrl mediaDuration createdAt read deleted edited
       sender { id name avatar isOnline lastSeen isDeleted}
       receiver { id name avatar isOnline lastSeen isDeleted}
       replyTo { id content type mediaUrl deleted sender { id name avatar } }
       reactions { emoji user { id name } }
     }
+  }
+`;
+
+
+export const START_CONVERSATION_MUTATION = /* GraphQL */ `
+  mutation StartConversation($otherUserId: ID!) {
+    startConversation(otherUserId: $otherUserId)
   }
 `;
 

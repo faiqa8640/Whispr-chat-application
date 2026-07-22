@@ -12,6 +12,7 @@ import {
   SET_TYPING_MUTATION,
   USER_STATUS_QUERY,
   TOGGLE_REACTION_MUTATION,
+  START_CONVERSATION_MUTATION,
 } from "../lib/mutations";
 import { uploadMedia, sendVoiceMessage } from "../lib/upload";
 import { useAuth } from "../context/AuthContext";
@@ -418,6 +419,7 @@ export default function ChatWindow() {
   const location = useLocation();
   const { user } = useAuth();
   const { theme } = useTheme();
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -576,21 +578,21 @@ export default function ChatWindow() {
     stopTypingNow();
   }
 
-  async function loadMessages() {
-    if (!userId) return;
+  async function loadMessages(cid: string) {
     const data = await gql<{ messages: MessageItem[] }>(MESSAGES_QUERY, {
-      withUserId: userId,
+      conversationId: cid,
       limit: 100,
     });
-    // Older cached responses (before this feature existed) won't include
-    // `reactions` — default to an empty array so the UI never has to
-    // special-case `undefined`. Same idea for `edited`, defaulted false.
-    const withReactionsDefaulted = data.messages.map((m) => ({
+    // Backend returns newest-first now — order chronologically for display
+    // without mutating the original array.
+    const chronological = [...data.messages].reverse();
+    const withReactionsDefaulted = chronological.map((m) => ({
       ...m,
       reactions: m.reactions ?? [],
       edited: m.edited ?? false,
     }));
     setMessages(withReactionsDefaulted);
+    
     const withPartner = data.messages.find((m) => m.sender.id === userId || m.receiver.id === userId);
     if (withPartner) {
       const partner = withPartner.sender.id === userId ? withPartner.sender : withPartner.receiver;
@@ -606,7 +608,6 @@ export default function ChatWindow() {
       await gql(MARK_CONVERSATION_READ_MUTATION, { withUserId: userId }).catch(() => {});
     }
   }
-
   async function loadPartnerStatus() {
     if (!userId) return;
     try {
@@ -626,7 +627,11 @@ export default function ChatWindow() {
 
   useEffect(() => {
     setLoading(true);
-    const state = location.state as { partnerName?: string; partnerAvatar?: string | null } | null;
+    const state = location.state as {
+      partnerName?: string;
+      partnerAvatar?: string | null;
+      conversationId?: string;
+    } | null;
     setPartnerName(state?.partnerName ?? "");
     setPartnerAvatar(state?.partnerAvatar ?? null);
     setPartnerTyping(false);
@@ -636,11 +641,22 @@ export default function ChatWindow() {
     setMediaError("");
     setShowEmojiPicker(false);
     setReactionPickerFor(null);
-    // NEW: drop out of any in-progress edit when switching conversations
     setEditingMessage(null);
     hasScrolledOnceRef.current = false;
-    loadMessages();
-    loadPartnerStatus();
+
+    (async () => {
+      let cid = state?.conversationId ?? null;
+      if (!cid && userId) {
+        const data = await gql<{ startConversation: string }>(
+          START_CONVERSATION_MUTATION,
+          { otherUserId: userId }
+        );
+        cid = data.startConversation;
+      }
+      setConversationId(cid);
+      if (cid) await loadMessages(cid);
+      await loadPartnerStatus();
+    })();
 
     return () => {
       stopTypingNow();

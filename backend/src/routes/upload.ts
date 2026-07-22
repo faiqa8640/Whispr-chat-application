@@ -58,7 +58,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     const user = await User.findById(userId);//find the user by id
-    if (!user || user.isDeleted) {//if not exist of is delete then error
+    if (!user || user.deletedAt) {//if not exist of is delete then error
       return res.status(401).json({ error: "Not authenticated." });
     }
 
