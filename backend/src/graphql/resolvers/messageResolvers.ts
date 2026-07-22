@@ -32,7 +32,7 @@ export async function formatMessage(msg: any) {
       // Stream it from our own temporary local route instead of signing
       // an S3 URL that doesn't have the object yet.
       mediaUrl = resource.status=== ResourceStatus.PENDING// if media pending 
-        ? buildLocalVoiceUrl(resource.s3key)// 
+        ? buildLocalVoiceUrl(resource.s3key)// make the local url to save it locally 
         : await getSignedMediaUrl(resource.s3key);//create a signed url
     } catch (err) {
       console.error("Failed to sign media URL:", err);
@@ -41,9 +41,10 @@ export async function formatMessage(msg: any) {
   }
 
   let replyTo = null;//This creates a variable for reply data.
-  if (msg.replyTo) { // if the msg replies to another message 
+  if (msg.replyTo) { // if the msg replies to another message  
     let replyMediaUrl: string | null = null;
-    const replyResource= msg.replyTo.resource;// reply to media resource
+    const replyResource= msg.replyTo.resource;// reply to media resource  
+    // if  it is reply to media url and the msg whom we need to reply isnot deleted 
     if (replyResource && !msg.replyTo.isDeleted) { // if reply to media msg then 
       try {
         // This creates a separate signed URL variable for the message being replied to.
@@ -124,8 +125,9 @@ export const messageResolvers = {
             {path: "resource"},
             {path : "reactions.user"},
           ],
-        });
+        })
 
+        //ORDERING OF THE CONVERSATION:
         //so basically we sort the conversations 
         // we take the 2 convo at a time => convo a and convo b
         convos.sort((convo_a, convo_b) => {
@@ -163,10 +165,16 @@ export const messageResolvers = {
             partner: formatUser(partner),
             // if the last message exist format it and return it => else return null
             lastMessage: convo.lastMessage? await formatMessage(convo.lastMessage):null,
+            //unreadcount => it is a map that contain the participents along with there unread msgs
+            //Give me the unread count for the currently logged-in user.
+            // i.e unreadcount => {["u1", 0], ["u2",2]}
+            // so get(u1)=> suposing u1 is the logined user => this give us the unread msg count for 
+            // that user => 0 
+            //??0 -> if the value dont exist return zero          
             unreadCount: convo.unreadCounts?.get(me._id.toString())??0,
           });
         }
-      return results;
+      return results; // contain the partener , lastmessage, unreadcount
 
     },
 
@@ -229,6 +237,8 @@ export const messageResolvers = {
   Mutation: {
 
     // __________send Message__________________________________________________
+    //Take a message from the sender → validate it → store it 
+    // → update the conversation → notify the receiver in real time.
     sendMessage: async (
       _: unknown,
       {
@@ -281,6 +291,8 @@ export const messageResolvers = {
         const original = await Message.findById(replyToId); // find the user whom we need to replay
         if (
           original &&// if the  user exist and
+          // and check that the msg belong to this conversation:
+          //either => me -> receiver  or receiver -> me 
           // The original message was sent by me to the receiver I am currently messaging.
           ((original.sender.toString() === me._id.toString() &&
             original.receiver.toString() === receiverId) ||
@@ -295,17 +307,27 @@ export const messageResolvers = {
 
       //find or create the conversation btw the authenticated use and the receiver
       const conversation= await findOrCreateConversation(me._id.toString(), receiverId);
+      // create a resource 
       let resourceId: mongoose.Types.ObjectId | undefined;
-      if(type != MessageType.TEXT && mediaKey){
+      if(type != MessageType.TEXT && mediaKey){// if media isnot text and  media key exist 
+        //get the extenstion 
+        // if cat.png => so we return .png 
+        //*remember that the frontend send the media key to the backend 
         const ext =mediaKey.includes(".")?mediaKey.split(".").pop()!: "";
+        // create the resource 
         const resource = await Resource.create({
+          // get the name => 
+          //i.e mediakey = whispr/images/123/cat.png
+          //  we split at / and hence => return cat.png 
           name: mediaKey.split("/").pop() || mediaKey,
           s3key : mediaKey,
+          // if type is image then resouce tyoe will be image else it will be voice 
           type : type===MessageType.IMAGE? ResourceType.IMAGE : ResourceType.VOICE,
+          // get the mimetype 
           mimeType: ext? `application/${ext}`:"application/octet-stream",
           status : ResourceStatus.UPLOADED,
           uploadedBy: me._id,
-          voiceMetadata:
+          voiceMetadata:// get the voice meta data 
             type===MessageType.VOICE && mediaDuration!=null
               ? {duration : mediaDuration}
               : undefined,
@@ -313,6 +335,7 @@ export const messageResolvers = {
         resourceId= resource._id;
       }
 
+      //creating the msg 
       const message = await Message.create({//creating the  message
         conversation : conversation._id,
         sender: me._id,
@@ -323,8 +346,11 @@ export const messageResolvers = {
         replyTo,
       });
 
+      // find the conversation byb the conversation id 
       await Conversation.findByIdAndUpdate(conversation._id, {
+        //set the last msg to the new msg
         $set: { lastMessage: message._id },
+        //increment the receiver unread msg count by 1
         $inc: { [`unreadCounts.${receiverId}`]: 1 },
       });
 
@@ -366,12 +392,15 @@ export const messageResolvers = {
         });
       }
 
+      // find the conversation 
       const convo = await Conversation.findOne({
+        //having the particepents => the autheticated user and receiver
         participents: { $all: [me._id.toString(), withUserId], $size: 2 },
       });
-      if (convo) {
+      if (convo) {// if the convo exist
+        // mark the unreadcount => as zero => as the conversation has been read 
         convo.unreadCounts.set(me._id.toString(), 0);
-        await convo.save();
+        await convo.save();// save the conversation  
       }
 
       return true;
@@ -403,43 +432,43 @@ export const messageResolvers = {
 
     unsendMessage: async (
       _: unknown,
-      { messageId }: { messageId: string },
+      { messageId }: { messageId: string }, // send the msg that need to me deleted 
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
-
+      const me = requireAuth(ctx);// authticate the user
+      //find the message by id 
       const message = await Message.findById(messageId).populate<{ sender: any; receiver: any; resource: any }>([
         "sender",
         "receiver",
         "resource",
       ]);
+      // if msg dont exist then through errror 
       if (!message) throw new Error("Message not found.");
 
+      //if the user is not the sender => cant delete the msg
       if (message.sender._id.toString() !== me._id.toString()) {
         throw new Error("You can only unsend messages you sent.");
       }
+      // id msg is already deleted 
       if (message.isDeleted) {
         throw new Error("This message was already unsent.");
       }
 
       // Permanently remove the underlying media (S3 object + Resource doc)
-      // BEFORE flipping the soft-delete flag — if this fails partway, we'd
-      // rather retry cleanup with the resource ref still intact than lose
-      // track of an orphaned file.
-      const resource: any = message.resource;
-      if (resource) {
+      const resource: any = message.resource;// get the msg resource
+      if (resource) {// if the resource exist
         try {
-          if (resource.status === ResourceStatus.PENDING) {
-            // Still mid-migration — only copy of the audio is the local
-            // scratch file, no S3 object exists yet.
+          if (resource.status === ResourceStatus.PENDING) {// is the sataus is pending 
+            // delete the file locally 
             await deleteVoiceFileLocally(resource.s3key);
           } else {
+            // else if the status is  uploaded => then delete the media 
             await deleteMediaObject(resource.s3key);
           }
+          // and delete that resource
           await Resource.deleteOne({ _id: resource._id });
         } catch (err) {
-          // Best-effort — even if cleanup fails, still proceed with
-          // soft-deleting the message itself below.
+          // error
           console.error("Failed to delete media:", err);
         }
       }
@@ -456,7 +485,7 @@ export const messageResolvers = {
       message.deletedAt = new Date();
       await message.save();
 
-      const formatted = {
+      const formatted = {//  format the msg
         id: message._id.toString(),
         sender: formatUser(message.sender),
         receiver: formatUser(message.receiver),
@@ -473,11 +502,11 @@ export const messageResolvers = {
       };
 
       // Adjust the receiver's unread badge if this message hadn't been read
-      // yet — the conversation's lastMessage pointer is left untouched.
-      const convo = await Conversation.findById(message.conversation);
-      if (convo && !message.isRead) {
-        const key = message.receiver._id.toString();
-        const current = convo.unreadCounts.get(key) ?? 0;
+      const convo = await Conversation.findById(message.conversation);// find the conversation
+      if (convo && !message.isRead) {// is the convo exist and msg is not read 
+        const key = message.receiver._id.toString();// get the recever id 
+        const current = convo.unreadCounts.get(key) ?? 0;// get the currunread msg count
+        //if curr count > 0 => set the receiver msg as current -1 
         if (current > 0) convo.unreadCounts.set(key, current - 1);
         await convo.save();
       }

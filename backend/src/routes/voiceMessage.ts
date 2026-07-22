@@ -77,27 +77,32 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
  // upload.single ->is Multer middleware.
 //  It expects exactly one uploaded file whose form-data field name is "file"
   try { 
-    const token = req.cookies?.delina_token;
+    const token = req.cookies?.delina_token; // get the token 
+    // if token dont exist then  return  authenticated 
     if (!token) return res.status(401).json({ error: "Not authenticated." });
 
     let senderId: string;
     try {
       senderId = verifyToken(token).id;// get the sender id 
-    } catch {
+    } catch {// eslse error 
       return res.status(401).json({ error: "Session expired. Please log in again." });
     }
 
-    const sender = await User.findById(senderId); // get the sender data
+    // find the sender from the db 
+    const sender = await User.findById(senderId); // get the sender from the db 
     if (!sender || sender.isDeleted) {// if sender not exist or is deleteed  then not auethenticated 
-      return res.status(401).json({ error: "Not authenticated." });
+      return res.status(401).json({ error: "Not authenticated." });// error 
     }
 
     const file = req.file;// read uploaded file 
+    // if file dont exist 
     if (!file) return res.status(400).json({ error: "No audio file uploaded." });
+    //if the file is not uploaded 
     if (!ALLOWED_VOICE_TYPES.has(file.mimetype)) {
       return res.status(400).json({ error: "Unsupported audio type." });
     }
 
+    //get the receiver id 
     const receiverId = req.body.receiverId as string | undefined;// get the reciever id from the body 
     // if no receiver exist 
     if (!receiverId) return res.status(400).json({ error: "receiverId is required." });
@@ -151,7 +156,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
       size: file.size,
       status : ResourceStatus.PENDING,
       uploadedBy: senderId,
-      voiceMetadata: mediaDuration != null ? {duration: "mediaDuration"}: undefined,
+      voiceMetadata: mediaDuration != null ? {duration: mediaDuration}: undefined,
     });
 
     // 2) Create + publish the message right away, pointing at the local file.
@@ -161,6 +166,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
       receiver: receiverId,
       content: "",
       type: MessageType.VOICE,
+      resource: resource._id,
       replyTo,
     });
 
@@ -200,7 +206,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
         await deleteMediaObject(mediaKey).catch(() => {});
         return;
       }
-
+      // find the resouce and updated it to uploaded 
       await  Resource.findByIdAndUpdate(resource._id, {status: ResourceStatus.UPLOADED});
 
       const repopulated = await Message.findById(current._id).populate<{ //repopulte the msg aagain
@@ -208,7 +214,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
         receiver: any;
         resource: any;
         replyTo: any;
-      }>(["sender", "receiver", { path: "replyTo", 
+      }>(["sender", "receiver","resource", { path: "replyTo", 
         populate: [{path: "sender"}, {path: "resource"}] }, "reactions.user"]);
 
       if (repopulated) {// why we called this event coz message is changes  
