@@ -90,7 +90,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
 
     // find the sender from the db 
     const sender = await User.findById(senderId); // get the sender from the db 
-    if (!sender || sender.isDeleted) {// if sender not exist or is deleteed  then not auethenticated 
+    if (!sender || sender.deletedAt) {// if sender not exist or is deleteed  then not auethenticated 
       return res.status(401).json({ error: "Not authenticated." });// error 
     }
 
@@ -113,7 +113,7 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
     const receiver = await User.findById(receiverId); // get the receiver from db 
     if (!receiver) return res.status(404).json({ error: "Recipient not found." });
     // //if not exist then error and if is deleted 
-    if (receiver.isDeleted) {
+    if (receiver.deletedAt) {
       return res.status(400).json({ error: "This account no longer exists." });
     }
 

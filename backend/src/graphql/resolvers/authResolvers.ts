@@ -31,7 +31,7 @@ export function formatUser(user: InstanceType<typeof User>) {
   // real profile info everywhere this user is referenced (messages,
   // conversations, replyTo previews, subscriptions) — but keep the same id
   // so existing message history for the other participant still resolves.
-  if (user.isDeleted) {
+  if (user.deletedAt) {
     return {
       id,
       name: "Deleted User",
@@ -380,9 +380,8 @@ export const authResolvers = {
       const authUser = requireAuth(ctx);
       const user = await User.findById(authUser._id);
       if (!user) throw new Error("User not found.");
-      if (user.isDeleted) throw new Error("This account has already been deleted.");
-
-      user.isDeleted = true;
+      if (user.deletedAt) throw new Error("This account has already been deleted.");
+      
       user.deletedAt = new Date();
 
       user.name = "Deleted User";

@@ -26,7 +26,7 @@ export async function formatMessage(msg: any) {
   let mediaUrl: string | null = null;
   const resource= msg.resource;
   // check msg hav the media keyu ? or can be text also and the msg is not deleted
-  if (resource && !msg.isDeleted) {
+  if (resource && !msg.deletedAt) {
     try {
       // Still uploading to S3 in the background (voice messages only)?
       // Stream it from our own temporary local route instead of signing
@@ -45,7 +45,7 @@ export async function formatMessage(msg: any) {
     let replyMediaUrl: string | null = null;
     const replyResource= msg.replyTo.resource;// reply to media resource  
     // if  it is reply to media url and the msg whom we need to reply isnot deleted 
-    if (replyResource && !msg.replyTo.isDeleted) { // if reply to media msg then 
+    if (replyResource && !msg.replyTo.deletedAt) { // if reply to media msg then 
       try {
         // This creates a separate signed URL variable for the message being replied to.
         // Same pending-check as above, in case the quoted message is
@@ -60,17 +60,17 @@ export async function formatMessage(msg: any) {
     replyTo = {// you build the reply object that will be returned to the frontend.
       id: msg.replyTo._id.toString(),//msg if
       sender: formatUser(msg.replyTo.sender),//sendr
-      content: msg.replyTo.isDeleted ? "" : msg.replyTo.content,
+      content: msg.replyTo.deletedAt ? "" : msg.replyTo.content,
       type: msg.replyTo.type || MessageType.TEXT,
       mediaUrl: replyMediaUrl,
-      deleted: !!msg.replyTo.isDeleted,
+      deleted: !!msg.replyTo.deletedAt,
     };
   }
 
   // Reactions — a message that's been unsent shouldn't show any (nothing
   // left to react to), everything else renders whatever's on the doc.
   // msg.reactions entries are subdocuments with a populated `user`.
-  const reactions = msg.isDeleted
+  const reactions = msg.deletedAt
     ? [] // if msg is deleted then no reaction 
     : (msg.reactions || [])//
         .filter((r: any) => r.user) // Remove reactions whose user no longer exists.
@@ -83,12 +83,12 @@ export async function formatMessage(msg: any) {
     id: msg._id.toString(),
     sender: formatUser(msg.sender),
     receiver: formatUser(msg.receiver),
-    content: msg.deleted ? "" : msg.content,
+    content: msg.deletedAt ? "" : msg.content,
     type: msg.type || MessageType.TEXT,
     mediaUrl,
     mediaDuration: resource?.voiceMetadata?.duration?? null,
     read: msg.isRead?? false,
-    deleted: !!msg.isDeleted,
+    deleted: !!msg.deletedAt,
     edited: !!msg.isEdited,//!!->converts any value into a boolean (true or false).
     createdAt: msg.createdAt,
     replyTo,
@@ -103,7 +103,7 @@ export const messageResolvers = {
     findUserByEmail: async (_: unknown, { email }: { email: string }, ctx: AuthContext) => {
       //  three parameters ->1) parent (_ -> exist but not used), email and then the context
       requireAuth(ctx);// it check that whether the user  is auenthicated or not
-      const user = await User.findOne({ email: email.toLowerCase(), isDeleted: { $ne: true } });
+      const user = await User.findOne({ email: email.toLowerCase(), deletedAt: null });
       // find the user and the account should not be deleted  
       return user ? formatUser(user) : null;// if user exist -> return user else return null
     },
@@ -215,11 +215,11 @@ export const messageResolvers = {
     // __________userstatus__________________________________________________
     userStatus: async (_: unknown, { userId }: { userId: string }, ctx: AuthContext) => {
       requireAuth(ctx);// check that the user is authenticated  
-      const user = await User.findById(userId).select("lastSeen isDeleted"); // we get the last scene and is deleted       // find the user by thhe id and get the last seen and is deleted
+      const user = await User.findById(userId).select("lastSeen deletedAt"); // we get the last scene and is deleted       // find the user by thhe id and get the last seen and is deleted
       return {
         userId,// return the user id 
         // if user is deleted then return false and if the user is not deleted the return check is user online
-        isOnline: user?.isDeleted ? false : isUserOnline(userId),
+        isOnline: user?.deletedAt ? false : isUserOnline(userId),
         // get the user lastseen if not exist the  return null
         // ? -> optional 
         // ?. -> continue only if exist
@@ -227,7 +227,7 @@ export const messageResolvers = {
         // !! -> convert to true and false 
         // ?? -> if exist 
         lastSeen: user?.lastSeen ?? null,
-        isDeleted: !!user?.isDeleted, 
+        isDeleted: !!user?.deletedAt, 
       };
     },
   },
@@ -283,7 +283,7 @@ export const messageResolvers = {
       const receiver = await User.findById(receiverId);// find the receiver by id
       if (!receiver) throw new Error("Recipient not found.");// if not exist then error
       // if account is not delete then through the error
-      if (receiver.isDeleted) throw new Error("This account no longer exists.");
+      if (receiver.deletedAt) throw new Error("This account no longer exists.");
 
       let replyTo: string | undefined;// replay to can be string or undefines
       // replytoid ->This searches the Message collection for the message being replied to.
@@ -450,7 +450,7 @@ export const messageResolvers = {
         throw new Error("You can only unsend messages you sent.");
       }
       // id msg is already deleted 
-      if (message.isDeleted) {
+      if (message.deletedAt) {
         throw new Error("This message was already unsent.");
       }
 
@@ -481,7 +481,6 @@ export const messageResolvers = {
       message.content = "";
       message.resource = undefined;
       message.reactions = [] as any;
-      message.isDeleted = true;
       message.deletedAt = new Date();
       await message.save();
 
@@ -545,7 +544,7 @@ export const messageResolvers = {
       if (message.sender.toString() !== me._id.toString()) {
         throw new Error("You can only edit messages you sent.");
       }
-      if (message.isDeleted) throw new Error("Can't edit a message that was unsent.");
+      if (message.deletedAt) throw new Error("Can't edit a message that was unsent.");
       if (message.type !== MessageType.TEXT) throw new Error("Only text messages can be edited.");
 
       message.content = content.trim();
@@ -606,7 +605,7 @@ export const messageResolvers = {
 
       const message = await Message.findById(messageId);
       if (!message) throw new Error("Message not found.");
-      if (message.isDeleted) throw new Error("Can't react to a message that was unsent.");
+      if (message.deletedAt) throw new Error("Can't react to a message that was unsent.");
 
       // Only the two people in this conversation can react to it.
       if (// login = nisha  => myid =nisha 

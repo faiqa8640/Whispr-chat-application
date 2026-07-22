@@ -138,7 +138,7 @@ async function main() {
           try {
             const decoded = verifyToken(token);// so we verify the token => after that the server knows that who own this token
             user = await User.findById(decoded.id);// so we find the user by the id and store it inside the user
-            if (user?.isDeleted) {// check the condition that if the user is deleted then return null
+            if (user?.deletedAt) {// check the condition that if the user is deleted then return null
               user = null;
             }
           } catch {

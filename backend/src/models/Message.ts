@@ -37,7 +37,6 @@ export interface IMessage extends Document {
   type: MessageType;
   resource?:mongoose.Types.ObjectId;// resource id for the resources 
   isRead: boolean;
-  isDeleted: boolean;
   deletedAt?: Date;
   isEdited: boolean;
   replyTo?: mongoose.Types.ObjectId;
@@ -82,7 +81,7 @@ const MessageSchema = new Schema<IMessage>(
       // the message should or should not have a content depens on the message 
       //like if text msg => content required  but if the msg is voice or image or is deleted -> then no content requried
       required: function (this: IMessage) {
-        return !this.isDeleted && this.type === MessageType.TEXT;
+        return !this.deletedAt && this.type === MessageType.TEXT;
       },
       trim: true, //remove spaces
       maxlength: 5000, //means max character of the message 
@@ -94,7 +93,6 @@ const MessageSchema = new Schema<IMessage>(
     type: { type: String, enum: Object.values(MessageType), default: MessageType.TEXT },
     resource : {type: Schema.Types.ObjectId, ref: "Resource", default : null },
     isRead: { type: Boolean, default: false },
-    isDeleted: { type: Boolean, default: false },
     deletedAt : {type: Date , default: null},
     isEdited: { type: Boolean, default: false },
     replyTo: { type: Schema.Types.ObjectId, ref: "Message", default: null },

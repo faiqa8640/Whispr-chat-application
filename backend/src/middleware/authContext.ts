@@ -53,7 +53,7 @@ export async function buildContext({
 
       // if the user is deleted and cookies still exist so we check that
       // if the user is deleted => so set user=nulll
-      if (user?.isDeleted) {
+      if (user?.deletedAt) {
         user = null;
       }
     }

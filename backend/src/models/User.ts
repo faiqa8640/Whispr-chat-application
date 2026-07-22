@@ -38,7 +38,6 @@ export interface IUser extends Document {
 
   lastSeen?: Date;//optional
 
-  isDeleted: boolean;
   deletedAt?: Date;//optional
 
   createdAt: Date;
@@ -76,8 +75,7 @@ const UserSchema = new Schema<IUser>(
     resetTokenExpires: { type: Date,   select: false },
 
     lastSeen: { type: Date },
-
-    isDeleted: { type: Boolean, default: false },
+    
     deletedAt: { type: Date },
   },
   { timestamps: true }//2)object => this is not the feild but it is an option 
