@@ -121,7 +121,7 @@ export const authResolvers = {
       await User.create({
         name,
         email: email.toLowerCase(),
-        password,                              // ← plain text; hook hashes it
+        password,                             
         provider: "local",
         isVerified: false,
         otpCode: hashedOtp,

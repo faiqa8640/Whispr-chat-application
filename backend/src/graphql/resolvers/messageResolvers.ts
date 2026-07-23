@@ -7,8 +7,11 @@ import { formatUser } from "./authResolvers";
 import type { IUser } from "../../models/User";
 import { pubsub, EVENTS } from "../pubsub";
 import { isUserOnline } from "../../utils/onlineStatus";
-import { getSignedMediaUrl, deleteMediaObject } from "../../utils/s3";
-import { buildLocalVoiceUrl, deleteVoiceFileLocally } from "../../utils/voiceLocalStore";
+// import { getSignedMediaUrl, deleteMediaObject } from "../../utils/s3";
+// import { buildLocalVoiceUrl, deleteVoiceFileLocally } from "../../utils/voiceLocalStore";
+import { deleteMediaObject } from "../../utils/s3";
+import { deleteVoiceFileLocally } from "../../utils/voiceLocalStore";
+import { resolveMediaUrl } from "../../utils/mediaUrl";
 import Resource ,{ResourceType, ResourceStatus} from "../../models/Resource";
 import { findOrCreateConversation } from "../../utils/conversationHelpers";
 import mongoose from "mongoose";
@@ -21,24 +24,12 @@ export { pubsub };
 // (routes/voiceMessage.ts) can format the message it creates/edits the
 // exact same way this resolver file does everywhere else.
 export async function formatMessage(msg: any) {
-  // it received one message from the momgodb  and convert it into the format that your frontend expert
-  // Once unsent, or if there's no media key, there's nothing to sign.
-  let mediaUrl: string | null = null;
-  const resource= msg.resource;
-  // check msg hav the media keyu ? or can be text also and the msg is not deleted
-  if (resource && !msg.deletedAt) {
-    try {
-      // Still uploading to S3 in the background (voice messages only)?
-      // Stream it from our own temporary local route instead of signing
-      // an S3 URL that doesn't have the object yet.
-      mediaUrl = resource.status=== ResourceStatus.PENDING// if media pending 
-        ? buildLocalVoiceUrl(resource.s3key)// make the local url to save it locally 
-        : await getSignedMediaUrl(resource.s3key);//create a signed url
-    } catch (err) {
-      console.error("Failed to sign media URL:", err);
-      mediaUrl = null;
-    }
-  }
+  // the mesage is formatted at the end so it means 
+  // that the resource now not just contain the object id but it contain the entire collection
+  // of the resource as i has be populated
+
+  // so return the resource if message is not deleted
+  const resource = msg.deletedAt ? null : msg.resource;
 
   let replyTo = null;//This creates a variable for reply data.
   if (msg.replyTo) { // if the msg replies to another message  
@@ -46,16 +37,8 @@ export async function formatMessage(msg: any) {
     const replyResource= msg.replyTo.resource;// reply to media resource  
     // if  it is reply to media url and the msg whom we need to reply isnot deleted 
     if (replyResource && !msg.replyTo.deletedAt) { // if reply to media msg then 
-      try {
-        // This creates a separate signed URL variable for the message being replied to.
-        // Same pending-check as above, in case the quoted message is
-        // itself a voice message still mid-upload.
-        replyMediaUrl = replyResource.status=== ResourceStatus.PENDING
-          ? buildLocalVoiceUrl(replyResource.s3key)
-          : await getSignedMediaUrl(replyResource.s3key);
-      } catch {
-        replyMediaUrl = null;
-      }
+      //replymedikey => get the resource url 
+      replyMediaUrl = await resolveMediaUrl(replyResource);
     }
     replyTo = {// you build the reply object that will be returned to the frontend.
       id: msg.replyTo._id.toString(),//msg if
@@ -85,7 +68,8 @@ export async function formatMessage(msg: any) {
     receiver: formatUser(msg.receiver),
     content: msg.deletedAt ? "" : msg.content,
     type: msg.type || MessageType.TEXT,
-    mediaUrl,
+    // mediaUrl,
+    resource,// the resource 
     mediaDuration: resource?.voiceMetadata?.duration?? null,
     read: msg.isRead?? false,
     deleted: !!msg.deletedAt,
@@ -95,6 +79,11 @@ export async function formatMessage(msg: any) {
     reactions,
   };
 }
+
+// complete flow :
+//query mongodb => populate refernences => all the format message
+// return the formated object => graphql resolve the field(like mediaurl)
+// and then the response is send back to the frontend 
 
 export const messageResolvers = {
   // __________QUERY__________________________________________________

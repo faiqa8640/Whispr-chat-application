@@ -7,6 +7,7 @@ import { verifyToken } from "../utils/token";
 import User from "../models/User";
 import Message, { MessageType } from "../models/Message"; 
 import { buildMediaKey, uploadBufferToS3, deleteMediaObject } from "../utils/s3";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 // Formats the message before sending it to frontend.
 import { formatMessage } from "../graphql/resolvers/messageResolvers";
 import { pubsub, EVENTS } from "../graphql/pubsub";
@@ -181,6 +182,8 @@ router.post("/voice-message", upload.single("file"), async (req, res) => {
       "reactions.user", //populate which person give the reaction 
     ]);
     const formatted = await formatMessage(populated); // format the message
+
+    (formatted as any).mediaUrl = await resolveMediaUrl(populated.resource);
     // now publish the messaage 
     pubsub.publish(EVENTS.MESSAGE_RECEIVED, { messageReceived: formatted });
     res.json(formatted); // response in json 
