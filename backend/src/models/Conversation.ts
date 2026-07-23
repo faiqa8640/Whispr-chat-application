@@ -8,7 +8,7 @@ import  mongoose , { Schema , Document,Model } from "mongoose";
 // ----------------------------------
 
 export interface IConversation extends Document {
-    participents : mongoose.Types.ObjectId[];
+    participants : mongoose.Types.ObjectId[];
     lastMessage?: mongoose.Types.ObjectId;
     unreadCounts: Map<string,number>;
     createdAt : Date;
@@ -22,7 +22,7 @@ export interface IConversation extends Document {
 
 const ConverstaionSchema = new Schema<IConversation>(
     {   //participents 
-        participents:[
+        participants:[
             {
                 type: Schema.Types.ObjectId,
                 ref : "User",

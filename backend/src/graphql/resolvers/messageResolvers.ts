@@ -50,7 +50,7 @@ export async function formatMessage(msg: any) {
         // This creates a separate signed URL variable for the message being replied to.
         // Same pending-check as above, in case the quoted message is
         // itself a voice message still mid-upload.
-        replyMediaUrl = replyResource.status= ResourceStatus.PENDING
+        replyMediaUrl = replyResource.status=== ResourceStatus.PENDING
           ? buildLocalVoiceUrl(replyResource.s3key)
           : await getSignedMediaUrl(replyResource.s3key);
       } catch {
@@ -103,9 +103,9 @@ export const messageResolvers = {
     findUserByEmail: async (_: unknown, { email }: { email: string }, ctx: AuthContext) => {
       //  three parameters ->1) parent (_ -> exist but not used), email and then the context
       requireAuth(ctx);// it check that whether the user  is auenthicated or not
-      const user = await User.findOne({ email: email.toLowerCase(), deletedAt: null });
+      const currentUser = await User.findOne({ email: email.toLowerCase(), deletedAt: null });
       // find the user and the account should not be deleted  
-      return user ? formatUser(user) : null;// if user exist -> return user else return null
+      return currentUser ? formatUser(currentUser) : null;// if user exist -> return user else return null
     },
 
 
@@ -117,10 +117,10 @@ export const messageResolvers = {
 
       const conversations = await Conversation.find({
         //get the all the conversations of currently logined user 
-        participents: currentUserId,
+        participants: currentUserId,
       })
         .sort({ updatedAt: -1 })// we sort the conversation based on the updated at 
-        .populate("participents")// populate the participants
+        .populate("participants")// populate the participants
         .populate({
           path: "lastMessage",
           populate: [
@@ -138,7 +138,7 @@ export const messageResolvers = {
           //we are apply Array destructuring => 
           // the firstparticipant = participants[0], and secondparticipant = participants[1]
           const [firstParticipant, secondParticipant] =
-            conversation.participents as any[];
+            conversation.participants as any[];
 
           const otherParticipant =// the chart partner
           // the oetherparticipant is the person whom the current user have the conversation with 
@@ -147,6 +147,8 @@ export const messageResolvers = {
               : firstParticipant;
 
           return {
+            // so we return the conversation id  to the frontend 
+            //so we need to load the message of that conversation again 
             id: conversation._id.toString(),
             otherParticipant: formatUser(otherParticipant),
 
@@ -163,66 +165,40 @@ export const messageResolvers = {
 
 
     // __________messages(inbox)__________________________________________________
-    // messages: async (
-    //   _: unknown,
-    //   { withUserId, limit = 50 }: { withUserId: string; limit?: number },
-    //   //  given the userid (of the partner)and the limit -> the default limit of the message history is 50
-    //   ctx: AuthContext
-    // ) => {
-    //   const me = requireAuth(ctx);// check the authenticated user and get it
-    //   const docs = await Message.find({// find the message in whic the user is either sender or receiver
-    //     // of the convo  with the partener
-    //     $or: [
-    //       { sender: me._id, receiver: withUserId },
-    //       { sender: withUserId, receiver: me._id },
-    //     ],
-    //   })
-    //     .sort({ createdAt: -1 })// sort the message in the desending order
-    //     // oldest comes first
-    //     .limit(limit)// apply the limit to the messsages
-    //     .populate("sender")// populate the sendeer and receiver and replyto
-    //     .populate("receiver")
-    //     .populate("resource")
-    //     .populate({ path: "replyTo", populate: { path: "sender" } })
-    //     .populate("reactions.user"); // who reacted with what
-    //     // after this the things is that the message are in the order
-    //     // oldest message first 
-    //     // i.e zain ->10:40 and then zain->10:30
-
-    //   const ordered = docs.reverse();//so we reverse it .. now the oldeest is the newest 
-    //   // This formats every message before returning it.
-    //   return Promise.all(ordered.map(formatMessage));// format all the messages 
-    // },
-
 
     messages: async (
-      _: unknown,
+      _: unknown,// get the conversationid and the message limit
       { conversationId, limit = 50 }: { conversationId: string; limit?: number },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
+      const currentUser = requireAuth(ctx);// authenticate the user
 
-      // Authorization: make sure the caller is actually a participant of
-      // this conversation before returning anything from it.
-      const convo = await Conversation.findById(conversationId);
-      if (
-        !convo ||
-        !convo.participents.map((p) => p.toString()).includes(me._id.toString())
-      ) {
+      // get the  conversation by the id
+      const conversation = await Conversation.findById(conversationId).select("participants");;
+      if (// if conversation dont exist => convo=null 
+        !conversation ||
+        // check that the user belong to this conversation 
+        // convo.participents => map through the participents 
+        // and as the each id of the object is the objectid (or object)
+        // so we convert it to string as we cant compare the object 
+        !conversation.participants.map((p) => p.toString()).includes(currentUser._id.toString())
+      ) {// if not true then through error
         throw new Error("Conversation not found.");
       }
 
-      const docs = await Message.find({ conversation: conversationId })
-        .sort({ createdAt: -1 }) // newest first — no reverse() anymore
-        .limit(limit)
+      // now we return all the messaging belonging to this conversation 
+      const messages = await Message.find({ conversation: conversationId })
+      // sort the message
+        .sort({ createdAt: -1 }) // newest first 
+        .limit(limit)// apply limit and populate 
         .populate("sender")
         .populate("receiver")
         .populate("resource")
         .populate({ path: "replyTo", populate: { path: "sender" } })
         .populate("reactions.user");
 
-      // Ordering is now the frontend's job — return as-is (newest first).
-      return Promise.all(docs.map(formatMessage));
+      // and we just return all message the ordering is now the fontend job
+      return Promise.all(messages.map(formatMessage));
     },
 
 
@@ -249,6 +225,30 @@ export const messageResolvers = {
 
   // __________MUTATION__________________________________________________
   Mutation: {
+
+    
+    //// __________startconversation__________________________________________________
+    // this is responsible for startinng the conversation 
+    //it get the conversation if exist and  if not exist then create the conversation 
+    startConversation: async (
+      _: unknown,
+      //we pass the id of the other user with whom want to have the conversation 
+      { otherUserId }: { otherUserId: string },
+      ctx: AuthContext
+    ) => {
+      const currentUser= requireAuth(ctx);// authticate the user
+      // if the mesging yourself => then not alloweded
+      if (otherUserId === currentUser._id.toString()) throw new Error("You can't message yourself.");
+      /// find the other person by the id 
+      const otherParticipant = await User.findById(otherUserId);
+      // if the other person not exist or the account has been deleted then through error
+      if (!otherParticipant || otherParticipant.deletedAt) throw new Error("This account no longer exists.");
+      // find the conversation => if not exist then create the conversation 
+      const conversation = await findOrCreateConversation(currentUser._id.toString(), otherUserId);
+      // return the conversation id 
+      return conversation._id.toString();
+    },
+
 
     // __________send Message__________________________________________________
     //Take a message from the sender → validate it → store it 
@@ -277,10 +277,10 @@ export const messageResolvers = {
       },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx); //check that the user is autheticated 
+      const currentUser = requireAuth(ctx); //check that the user is autheticated 
 
       // if receiver is me then i cant send message to myself so therefore throw and error
-      if (receiverId === me._id.toString()) throw new Error("You can't message yourself."); 
+      if (receiverId === currentUser._id.toString()) throw new Error("You can't message yourself."); 
 
       // if the type is text
       if (type === MessageType.TEXT) {// cant be empty
@@ -302,17 +302,17 @@ export const messageResolvers = {
       let replyTo: string | undefined;// replay to can be string or undefines
       // replytoid ->This searches the Message collection for the message being replied to.
       if (replyToId) {// if it exist
-        const original = await Message.findById(replyToId); // find the user whom we need to replay
+        const originalMessage = await Message.findById(replyToId); // find the user whom we need to replay
         if (
-          original &&// if the  user exist and
+          originalMessage &&// if the  user exist and
           // and check that the msg belong to this conversation:
           //either => me -> receiver  or receiver -> me 
           // The original message was sent by me to the receiver I am currently messaging.
-          ((original.sender.toString() === me._id.toString() &&
-            original.receiver.toString() === receiverId) ||
+          ((originalMessage.sender.toString() === currentUser._id.toString() &&
+            originalMessage.receiver.toString() === receiverId) ||
             // The original message may have been sent in the opposite direction: from the receiver to you.
-            (original.receiver.toString() === me._id.toString() &&
-              original.sender.toString() === receiverId))
+            (originalMessage.receiver.toString() === currentUser._id.toString() &&
+              originalMessage.sender.toString() === receiverId))
         ) {
           // Only after all checks pass, the new message stores the reply reference:
           replyTo = replyToId;
@@ -321,7 +321,7 @@ export const messageResolvers = {
 
 
       //find or create the conversation btw the authenticated use and the receiver
-      const conversation= await findOrCreateConversation(me._id.toString(), receiverId);
+      const conversation= await findOrCreateConversation(currentUser._id.toString(), receiverId);
       // create a resource 
       let resourceId: mongoose.Types.ObjectId | undefined;
       if(type != MessageType.TEXT && mediaKey){// if media isnot text and  media key exist 
@@ -341,7 +341,7 @@ export const messageResolvers = {
           // get the mimetype 
           mimeType: ext? `application/${ext}`:"application/octet-stream",
           status : ResourceStatus.UPLOADED,
-          uploadedBy: me._id,
+          uploadedBy: currentUser._id,
           voiceMetadata:// get the voice meta data 
             type===MessageType.VOICE && mediaDuration!=null
               ? {duration : mediaDuration}
@@ -353,7 +353,7 @@ export const messageResolvers = {
       //creating the msg 
       const message = await Message.create({//creating the  message
         conversation : conversation._id,
-        sender: me._id,
+        sender: currentUser._id,
         receiver: receiverId,
         content: type === MessageType.TEXT ? content!.trim() : "",
         type,
@@ -392,49 +392,35 @@ export const messageResolvers = {
       { withUserId }: { withUserId: string },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);//authenticated user
+      const currentUser = requireAuth(ctx);//authenticated user
       const result = await Message.updateMany(//if the sender is the partner and i am receiver and read is false
-        { sender: withUserId, receiver: me._id, isRead: false },
+        { sender: withUserId, receiver: currentUser._id, isRead: false },
         { $set: { isRead: true } }// then set read true
       );
 
       if (result.modifiedCount > 0) {// if the count of message mark as read is greater then zero
         pubsub.publish(EVENTS.MESSAGES_READ, {// then  publish the event
           messagesRead: {
-            readerId: me._id.toString(),
+            readerId: currentUser._id.toString(),
             conversationWith: withUserId,
           },
         });
       }
 
       // find the conversation 
-      const convo = await Conversation.findOne({
+      const conversation = await Conversation.findOne({
         //having the particepents => the autheticated user and receiver
-        participents: { $all: [me._id.toString(), withUserId], $size: 2 },
+        participants: { $all: [currentUser._id.toString(), withUserId], $size: 2 },
       });
-      if (convo) {// if the convo exist
+      if (conversation) {// if the convo exist
         // mark the unreadcount => as zero => as the conversation has been read 
-        convo.unreadCounts.set(me._id.toString(), 0);
-        await convo.save();// save the conversation  
+        conversation.unreadCounts.set(currentUser._id.toString(), 0);
+        await conversation.save();// save the conversation  
       }
 
       return true;
     },
 
-
-    //// __________startconversation__________________________________________________
-    startConversation: async (
-      _: unknown,
-      { otherUserId }: { otherUserId: string },
-      ctx: AuthContext
-    ) => {
-      const me = requireAuth(ctx);
-      if (otherUserId === me._id.toString()) throw new Error("You can't message yourself.");
-      const other = await User.findById(otherUserId);
-      if (!other || other.deletedAt) throw new Error("This account no longer exists.");
-      const convo = await findOrCreateConversation(me._id.toString(), otherUserId);
-      return convo._id.toString();
-    },
 
     // __________unsendmessage__________________________________________________
     /**
@@ -465,7 +451,7 @@ export const messageResolvers = {
       { messageId }: { messageId: string }, // send the msg that need to me deleted 
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);// authticate the user
+      const currentUser = requireAuth(ctx);// authticate the user
       //find the message by id 
       const message = await Message.findById(messageId).populate<{ sender: any; receiver: any; resource: any }>([
         "sender",
@@ -476,7 +462,7 @@ export const messageResolvers = {
       if (!message) throw new Error("Message not found.");
 
       //if the user is not the sender => cant delete the msg
-      if (message.sender._id.toString() !== me._id.toString()) {
+      if (message.sender._id.toString() !== currentUser._id.toString()) {
         throw new Error("You can only unsend messages you sent.");
       }
       // id msg is already deleted 
@@ -531,13 +517,13 @@ export const messageResolvers = {
       };
 
       // Adjust the receiver's unread badge if this message hadn't been read
-      const convo = await Conversation.findById(message.conversation);// find the conversation
-      if (convo && !message.isRead) {// is the convo exist and msg is not read 
+      const conversation = await Conversation.findById(message.conversation);// find the conversation
+      if (conversation && !message.isRead) {// is the convo exist and msg is not read 
         const key = message.receiver._id.toString();// get the recever id 
-        const current = convo.unreadCounts.get(key) ?? 0;// get the currunread msg count
+        const current = conversation.unreadCounts.get(key) ?? 0;// get the currunread msg count
         //if curr count > 0 => set the receiver msg as current -1 
-        if (current > 0) convo.unreadCounts.set(key, current - 1);
-        await convo.save();
+        if (current > 0) conversation.unreadCounts.set(key, current - 1);
+        await conversation.save();
       }
 
       pubsub.publish(EVENTS.MESSAGE_UNSENT, { messageUnsent: formatted });
@@ -564,14 +550,14 @@ export const messageResolvers = {
       { messageId, content }: { messageId: string; content: string },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
+      const currentUser = requireAuth(ctx);
 
       if (!content || !content.trim()) throw new Error("Message cannot be empty.");
 
       const message = await Message.findById(messageId);
       if (!message) throw new Error("Message not found.");
 
-      if (message.sender.toString() !== me._id.toString()) {
+      if (message.sender.toString() !== currentUser._id.toString()) {
         throw new Error("You can only edit messages you sent.");
       }
       if (message.deletedAt) throw new Error("Can't edit a message that was unsent.");
@@ -602,9 +588,9 @@ export const messageResolvers = {
       { receiverId, isTyping }: { receiverId: string; isTyping: boolean },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);
+      const currentUser = requireAuth(ctx);
       pubsub.publish(EVENTS.TYPING, {
-        typingStatus: { userId: me._id.toString(), receiverId, isTyping },
+        typingStatus: { userId: currentUser._id.toString(), receiverId, isTyping },
       });
       return true;
     },
@@ -628,8 +614,8 @@ export const messageResolvers = {
       { messageId, emoji }: { messageId: string; emoji: string },
       ctx: AuthContext
     ) => {
-      const me = requireAuth(ctx);// check weather the user is login 
-      const myId = me._id.toString(); // get the if of the logined use 
+      const currentUser = requireAuth(ctx);// check weather the user is login 
+      const currentUserId = currentUser._id.toString(); // get the if of the logined use 
 
       if (!emoji || !emoji.trim()) throw new Error("An emoji is required to react.");
 
@@ -644,32 +630,32 @@ export const messageResolvers = {
         // faiqa !=nisha and zainab != nisha => true and true=> through error cant react
         // if myid=faiqa 
         // then faiqa=== faiqa => false and overall false => so can reac to the message  
-        message.sender.toString() !== myId &&
-        message.receiver.toString() !== myId
+        message.sender.toString() !== currentUserId &&
+        message.receiver.toString() !== currentUserId
       ) {
         throw new Error("You can't react to this message.");
       }
 
-      const existingIndex = message.reactions.findIndex(//Searches for the current user's reaction.
+      const existingReaction = message.reactions.findIndex(//Searches for the current user's reaction.
         // that has the user already reacted ? if yes then find that 
-        (r) => r.user.toString() === myId//Compares each reaction's user ID with the logged-in user's ID.
+        (r) => r.user.toString() === currentUserId//Compares each reaction's user ID with the logged-in user's ID.
         //Stores the index of the user's reaction.
       );
 
       // if the user already reacted and he taped with  the same emoji => will get removed 
-      if (existingIndex !== -1 && message.reactions[existingIndex].emoji === emoji) {
+      if (existingReaction !== -1 && message.reactions[existingReaction].emoji === emoji) {
         //existingIndex !== -1  => if found one
         //Checks if the user already reacted with the same emoji.
         // Tapped the same emoji they already reacted with — remove it.
-        message.reactions.splice(existingIndex, 1);//Removes that reaction.
-      } else if (existingIndex !== -1) {//Checks if the user reacted before, but with a different emoji.
+        message.reactions.splice(existingReaction, 1);//Removes that reaction.
+      } else if (existingReaction !== -1) {//Checks if the user reacted before, but with a different emoji.
         // Reacted before with a different emoji — swap it over.
         //Changes the old emoji to the new one.
-        message.reactions[existingIndex].emoji = emoji;
+        message.reactions[existingReaction].emoji = emoji;
       } else {// First reaction from this user on this message.
         //Adds a new reaction.
         //Saves the user's ID.
-        message.reactions.push({ user: me._id, emoji });
+        message.reactions.push({ user: currentUser._id, emoji });
       }
 
       await message.save();
