@@ -35,7 +35,7 @@ import { buildContext } from "./middleware/authContext";
 import { ENV } from "./config/env";
 import uploadRouter from "./routes/upload";
 import mediaProxyRouter from "./routes/mediaProxy";
-import voiceMessageRouter from "./routes/voiceMessage"; // NEW
+import voiceMessageRouter from "./routes/voiceMessage"; 
 
 
 // we create the schema by makeExecutableSchema => that takes the typedefs and resolvers and refernce the schema
